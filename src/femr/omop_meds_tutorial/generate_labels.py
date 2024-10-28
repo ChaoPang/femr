@@ -13,7 +13,8 @@ import shutil
 from typing import List, Mapping
 from pathlib import Path
 
-LABEL_NAMES = ['death', 'long_los']
+# LABEL_NAMES = ['death', 'long_los']
+LABEL_NAMES = ['long_los']
 ADMISSION_EVENTS = ["Visit/IP", "Visit/ERIP", "CMS Place of Service/51", "CMS Place of Service/61"]
 
 
