@@ -46,10 +46,10 @@ class Task(abc.ABC):
 
     @abc.abstractmethod
     def add_event(
-        self,
-        current_date: datetime.datetime,
-        next_date: Optional[datetime.datetime],
-        next_features: Optional[Sequence[int]],
+            self,
+            current_date: datetime.datetime,
+            next_date: Optional[datetime.datetime],
+            next_features: Optional[Sequence[int]],
     ) -> int: ...
 
     @abc.abstractmethod
@@ -60,6 +60,7 @@ class Task(abc.ABC):
 
 
 class LabeledSubjectTask(Task):
+
     def __init__(self, labels: Sequence[meds.Label]):
         super().__init__()
 
@@ -89,10 +90,10 @@ class LabeledSubjectTask(Task):
         pass
 
     def add_event(
-        self,
-        current_date: datetime.datetime,
-        next_date: Optional[datetime.datetime],
-        next_features: Optional[Sequence[int]] = None,
+            self,
+            current_date: datetime.datetime,
+            next_date: Optional[datetime.datetime],
+            next_features: Optional[Sequence[int]] = None,
     ) -> int:
         has_label = False
 
@@ -124,6 +125,9 @@ class LabeledSubjectTask(Task):
     def get_batch_data(self) -> Mapping[str, np.ndarray]:
         return {}
 
+    def get_sampled_labels(self, length: int) -> int:
+        return length
+
 
 class CLMBRTask(Task):
     def __init__(self, clmbr_vocab_size: int):
@@ -147,10 +151,10 @@ class CLMBRTask(Task):
         self.batch_labels.extend([self.per_subject_batch_labels[i] for i in subject_label_offsets])
 
     def add_event(
-        self,
-        current_date: datetime.datetime,
-        next_date: Optional[datetime.datetime],
-        next_features: Optional[Sequence[int]] = None,
+            self,
+            current_date: datetime.datetime,
+            next_date: Optional[datetime.datetime],
+            next_features: Optional[Sequence[int]] = None,
     ) -> int:
         if next_features is None:
             return 0
@@ -170,9 +174,11 @@ class CLMBRTask(Task):
     def get_batch_data(self) -> Mapping[str, np.ndarray]:
         return {"labels": np.array(self.batch_labels, dtype=np.int32)}
 
+
 class SurvivalCalculator:
     def __init__(
-        self, ontology: femr.ontology.Ontology, subject: meds_reader.Subject, code_whitelist: Optional[Set[str]] = None
+            self, ontology: femr.ontology.Ontology, subject: meds_reader.Subject,
+            code_whitelist: Optional[Set[str]] = None
     ):
         self.survival_events = []
         self.final_date = subject.events[-1].time
@@ -200,7 +206,7 @@ class SurvivalCalculator:
         self.survival_events.reverse()
 
     def get_future_events_for_time(
-        self, time: datetime.datetime
+            self, time: datetime.datetime
     ) -> Tuple[datetime.timedelta, Mapping[str, datetime.timedelta]]:
         while len(self.survival_events) > 0 and self.survival_events[-1][1] <= time:
             code = self.survival_events[-1][0]
@@ -216,7 +222,7 @@ class SurvivalCalculator:
 
 
 def _prefit_motor_map(
-    subjects: Iterator[meds_reader.Subject], *, tasks: List[str], ontology: femr.ontology.Ontology
+        subjects: Iterator[meds_reader.Subject], *, tasks: List[str], ontology: femr.ontology.Ontology
 ) -> Any:
     task_time_stats: List[Any] = [[0, 0, femr.stat_utils.OnlineStatistics()] for _ in range(len(tasks))]
     event_times = femr.stat_utils.ReservoirSampler(100_000)
@@ -228,7 +234,8 @@ def _prefit_motor_map(
         birth = femr.pat_utils.get_subject_birthdate(subject)
 
         for event, next_event in zip(subject.events, subject.events[1:]):
-            if (event.time is None) or (event.time.date() == birth.date()) or (event.time.date() == next_event.time.date()):
+            if (event.time is None) or (event.time.date() == birth.date()) or (
+                    event.time.date() == next_event.time.date()):
                 continue
 
             censor_time, tte = calculator.get_future_events_for_time(event.time)
@@ -266,12 +273,12 @@ def _prefit_motor_agg(first: Any, second: Any) -> Any:
 class MOTORTask(Task):
     @classmethod
     def fit_pretraining_task_info(
-        cls,
-        db: meds_reader.SubjectDatabase,
-        tokenizer: femr.models.tokenizer.HierarchicalTokenizer,
-        num_tasks: int,
-        num_bins: int,
-        final_layer_size: int,
+            cls,
+            db: meds_reader.SubjectDatabase,
+            tokenizer: femr.models.tokenizer.HierarchicalTokenizer,
+            num_tasks: int,
+            num_bins: int,
+            final_layer_size: int,
     ) -> MOTORTask:
         tasks = []
         for dict_entry in tokenizer.dictionary["vocab"]:
@@ -299,15 +306,16 @@ class MOTORTask(Task):
             rate = frac_events / task_stats[2].mean()
 
             if rate == 0:
-                print("Ran into task of rate 0?", task, frac_events, task_stats[0], task_stats[1], task_stats[2].mean())  
+                print("Ran into task of rate 0?", task, frac_events, task_stats[0], task_stats[1], task_stats[2].mean())
                 continue
 
-            if frac_events < 1/1000:
-                print("Ran into very rare task with less than 10 occurrences", task, frac_events, task_stats[0], task_stats[1], task_stats[2].mean())
+            if frac_events < 1 / 1000:
+                print("Ran into very rare task with less than 10 occurrences", task, frac_events, task_stats[0],
+                      task_stats[1], task_stats[2].mean())
                 continue
-            
+
             task_data.append((task, rate, task_stats[0], task_stats[1], task_stats[2].mean()))
-            
+
         return MOTORTask(task_data, time_bins, final_layer_size)
 
     def __init__(self, pretraining_task_info: List[Tuple[str, float]], time_bins: List[float], final_layer_size: int):
@@ -371,15 +379,15 @@ class MOTORTask(Task):
             self.time_sparse["indptr"].append(len(self.time_sparse["indices"]))
 
     def add_event(
-        self,
-        current_date: datetime.datetime,
-        next_date: Optional[datetime.datetime],
-        next_features: Optional[Sequence[int]] = None,
-        actually_add: bool = True,
+            self,
+            current_date: datetime.datetime,
+            next_date: Optional[datetime.datetime],
+            next_features: Optional[Sequence[int]] = None,
+            actually_add: bool = True,
     ) -> int:
         if next_date is None or next_date == current_date:
             return 0
-        
+
         if not actually_add:
             return 1
 
