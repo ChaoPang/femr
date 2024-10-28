@@ -20,7 +20,6 @@ import femr.models.rmsnorm
 import femr.models.tasks
 import femr.models.tokenizer
 import femr.models.xformers
-import torch_hawk
 
 
 # From https://github.com/kingoflolz/mesh-transformer-jax
@@ -74,32 +73,21 @@ def apply_rotary_pos_emb(x, sincos):
 
 
 class FEMREncoderLayer(nn.Module):
-    def __init__(self, config: femr.models.config.FEMRTransformerConfig, use_hawk=False):
+    def __init__(self, config: femr.models.config.FEMRTransformerConfig):
         super().__init__()
         self.config = config
-        self.use_hawk = use_hawk
-
         self.norm = femr.models.rmsnorm.RMSNorm(self.config.hidden_size)
         if self.config.hidden_act == "swiglu":
             hidden_mult = 2
         else:
             hidden_mult = 1
 
-        if self.use_hawk:
-            self.input_proj = nn.Linear(
-                self.config.hidden_size,
-                hidden_mult * self.config.intermediate_size,
-                bias=self.config.use_bias,
-            )
-            self.hawk_module = torch_hawk.RecurrentBlock(self.config.hidden_size, num_heads=self.config.n_heads)
-        else:
-            self.input_proj = nn.Linear(
-                self.config.hidden_size,
-                self.config.hidden_size * 3 + hidden_mult * self.config.intermediate_size,
-                bias=self.config.use_bias,
-            )
+        self.input_proj = nn.Linear(
+            self.config.hidden_size,
+            self.config.hidden_size * 3 + hidden_mult * self.config.intermediate_size,
+            bias=self.config.use_bias,
+        )
 
-        
         self.output_proj = nn.Linear(
             self.config.hidden_size + self.config.intermediate_size, self.config.hidden_size, bias=self.config.use_bias
         )
@@ -108,39 +96,30 @@ class FEMREncoderLayer(nn.Module):
         x = self.norm(x)
 
         if self.config.use_normed_ages:
-            if self.use_hawk:
-                all_time = time_data
-            else:
-                all_time = torch.concatenate((time_data, time_data**2), axis=-1)
-        
+            all_time = torch.concatenate((time_data, time_data**2), axis=-1)
             x[:, -all_time.shape[1]:] = all_time.to(dtype=x.dtype)
 
         transformed = self.input_proj(x)
 
-        if self.use_hawk:
-            attn = self.hawk_module(x, s)
-            ff = transformed
-        else:
-        
-            ff = transformed[:, : -self.config.hidden_size * 3]
-            qkv = transformed[:, -self.config.hidden_size * 3 :]
+        ff = transformed[:, : -self.config.hidden_size * 3]
+        qkv = transformed[:, -self.config.hidden_size * 3 :]
 
-            head_size = self.config.hidden_size // self.config.n_heads
+        head_size = self.config.hidden_size // self.config.n_heads
 
-            qkv = qkv.reshape(x.shape[0], 3, self.config.n_heads, head_size)
+        qkv = qkv.reshape(x.shape[0], 3, self.config.n_heads, head_size)
 
-            q = apply_rotary_pos_emb(qkv[:, 0, :, :], pos_embed)
-            k = apply_rotary_pos_emb(qkv[:, 1, :, :], pos_embed)
-            v = qkv[:, 2, :, :]
+        q = apply_rotary_pos_emb(qkv[:, 0, :, :], pos_embed)
+        k = apply_rotary_pos_emb(qkv[:, 1, :, :], pos_embed)
+        v = qkv[:, 2, :, :]
 
-            attn = femr.models.xformers.memory_efficient_attention_wrapper(
-                q.unsqueeze(0),
-                k.unsqueeze(0),
-                v.unsqueeze(0),
-                attn_bias=attn_bias,
-            )
+        attn = femr.models.xformers.memory_efficient_attention_wrapper(
+            q.unsqueeze(0),
+            k.unsqueeze(0),
+            v.unsqueeze(0),
+            attn_bias=attn_bias,
+        )
 
-            attn = attn.reshape(x.shape)
+        attn = attn.reshape(x.shape)
 
 
         if self.config.hidden_act == "gelu":
@@ -173,7 +152,7 @@ class FEMRTransformer(nn.Module):
                 include_last_offset=True,
             )
 
-        self.layers = nn.ModuleList([FEMREncoderLayer(config, use_hawk=(i % 2 == 0)) for i in range(self.config.n_layers)])
+        self.layers = nn.ModuleList([FEMREncoderLayer(config) for i in range(self.config.n_layers)])
 
     def forward(self, batch, s):
         if not self.config.is_hierarchical:

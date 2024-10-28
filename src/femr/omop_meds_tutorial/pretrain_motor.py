@@ -50,7 +50,7 @@ def main():
     transformer_config = femr.models.config.FEMRTransformerConfig(
         vocab_size=tokenizer.vocab_size,
         is_hierarchical=isinstance(tokenizer, femr.models.tokenizer.HierarchicalTokenizer),
-        n_layers=7,
+        n_layers=6,
         use_normed_ages=True,
         use_bias=False,
         hidden_act='swiglu',
