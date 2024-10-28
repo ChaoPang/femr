@@ -14,7 +14,7 @@ from typing import List, Mapping
 from pathlib import Path
 
 # LABEL_NAMES = ['death', 'long_los']
-LABEL_NAMES = ['long_los']
+LABEL_NAMES = ['long_los', '30d']
 ADMISSION_EVENTS = ["Visit/IP", "Visit/ERIP", "CMS Place of Service/51", "CMS Place of Service/61"]
 
 
