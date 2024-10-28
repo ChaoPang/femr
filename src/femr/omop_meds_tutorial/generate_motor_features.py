@@ -25,7 +25,9 @@ def main():
             )
             typed_labels = [
                 meds.Label(
-                    subject_id = label["subject_id"], prediction_time=label["prediction_time"],boolean_value=label["boolean_value"],
+                    subject_id=label["subject_id"],
+                    prediction_time=label["prediction_time"],
+                    boolean_value=label["boolean_value"],
                 )
                 for label in labels.to_dict(orient="records")
             ]

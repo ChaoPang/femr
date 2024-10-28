@@ -485,9 +485,12 @@ def compute_features(
     with torch.no_grad():
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             for batch in tqdm(loader):
+                source_subject_ids = set(batch["subject_ids"].to(cpu_device)[0].tolist())
                 if device:
                     batch = to_device(batch, device)
                 _, result = model(**batch, return_reprs=True)
+                dest_subject_ids = set(result["subject_ids"].to(cpu_device, non_blocking=True))
+                assert source_subject_ids == dest_subject_ids
                 all_subject_ids.append(result["subject_ids"].to(cpu_device, non_blocking=True))
                 all_feature_times.append(result["timestamps"].to(cpu_device, non_blocking=True))
                 all_representations.append(result["representations"].to(cpu_device, non_blocking=True))
