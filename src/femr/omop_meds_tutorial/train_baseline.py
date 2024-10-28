@@ -71,11 +71,11 @@ def main():
 
             labeled_features = femr.featurizers.join_labels(features, labels)
             main_split = femr.splits.SubjectSplit.load_from_csv(str(models_path.parent / 'main_split.csv'))
-            train_split = femr.splits.generate_hash_split(main_split.train_patient_ids, 17, frac_test=0.10)
+            train_split = femr.splits.generate_hash_split(main_split.train_subject_ids, 17, frac_test=0.10)
 
-            train_mask = np.isin(labeled_features['patient_ids'], train_split.train_subject_ids)
-            dev_mask = np.isin(labeled_features['patient_ids'], train_split.test_subject_ids)
-            test_mask = np.isin(labeled_features['patient_ids'], main_split.test_subject_ids)
+            train_mask = np.isin(labeled_features['subject_ids'], train_split.train_subject_ids)
+            dev_mask = np.isin(labeled_features['subject_ids'], train_split.test_subject_ids)
+            test_mask = np.isin(labeled_features['subject_ids'], main_split.test_subject_ids)
 
             def apply_mask(values, mask):
                 def apply(k, v):
