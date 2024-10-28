@@ -50,7 +50,7 @@ def main():
     transformer_config = femr.models.config.FEMRTransformerConfig(
         vocab_size=tokenizer.vocab_size,
         is_hierarchical=isinstance(tokenizer, femr.models.tokenizer.HierarchicalTokenizer),
-        n_layers=6,
+        n_layers=7,
         use_normed_ages=True,
         use_bias=False,
         hidden_act='swiglu',
@@ -62,7 +62,6 @@ def main():
     model = femr.models.transformer.FEMRModel(config)
     model = model.to(torch.device("cuda"))
 
-    collator = processor.collate
     learning_rate = args.learning_rate
 
     trainer_config = transformers.TrainingArguments(
@@ -77,7 +76,7 @@ def main():
         weight_decay=0.1,
         adam_beta2=0.95,
 
-        report_to="tensorboard",
+        report_to=["tensorboard"],
 
         num_train_epochs=100,
 
