@@ -108,11 +108,9 @@ def main(args):
             val_batches.save_to_disk(val_batches_path)
 
 
-if __name__ == "__main__":
+def create_omop_meds_tutorial_argparser():
     import argparse
-
     parser = argparse.ArgumentParser(description="Arguments for preparing Motor")
-
     parser.add_argument(
         "--pretraining_data",
         dest="pretraining_data",
@@ -131,4 +129,8 @@ if __name__ == "__main__":
         action="store",
         required=True,
     )
-    main(parser.parse_args())
+    return parser
+
+
+if __name__ == "__main__":
+    main(create_omop_meds_tutorial_argparser().parse_args())
