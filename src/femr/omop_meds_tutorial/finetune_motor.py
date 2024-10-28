@@ -26,6 +26,7 @@ def main():
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in LABEL_NAMES:
             labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
+            labels = labels.sort_values(["subject_id", "prediction_time"])
             with open(models_path.parent / 'features' / (label_name + '_motor.pkl'), 'rb') as f:
                 features = pickle.load(f)
             labeled_features = femr.featurizers.join_labels(features, labels)
