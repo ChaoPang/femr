@@ -8,10 +8,7 @@ import femr.labelers
 import meds_reader
 import meds
 import datetime
-
 import shutil
-import pyarrow as pa
-import pyarrow.csv as pacsv
 
 from typing import List, Mapping
 from pathlib import Path
@@ -126,8 +123,7 @@ def main():
         for label_name in LABEL_NAMES:
             labeler = labelers[label_name]
             labels = labeler.apply(database)
-            label_frame = pa.Table.from_pandas(labels)
-            pacsv.write_csv(label_frame, labels_path / (label_name + '.csv'))
+            labels.to_parquet(str(labels_path / (label_name + '.parquet')))
 
 
 if __name__ == "__main__":
