@@ -9,7 +9,6 @@ import meds_reader
 import meds
 import datetime
 
-import os
 import shutil
 import pyarrow as pa
 import pyarrow.csv as pacsv
@@ -17,6 +16,7 @@ import pyarrow.csv as pacsv
 from typing import List, Mapping
 from pathlib import Path
 
+LABEL_NAMES = ['death', 'long_los']
 ADMISSION_EVENTS = ["Visit/IP", "Visit/ERIP", "CMS Place of Service/51", "CMS Place of Service/61"]
 
 
@@ -123,7 +123,7 @@ def main():
     labels_path.mkdir(exist_ok=False)
 
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
-        for label_name in ['death', 'long_los']:
+        for label_name in LABEL_NAMES:
             labeler = labelers[label_name]
             labels = labeler.apply(database)
             label_frame = pa.Table.from_pandas(labels)
