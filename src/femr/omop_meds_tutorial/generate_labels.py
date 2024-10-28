@@ -126,8 +126,8 @@ def main():
         for label_name in ['death', 'long_los']:
             labeler = labelers[label_name]
             labels = labeler.apply(database)
-            label_frame = pa.Table.from_pylist(labels, meds.label_schema)
-            pacsv.write_csv(label_frame, os.path.join('labels', label_name + '.csv'))
+            label_frame = pa.Table.from_pandas(labels)
+            pacsv.write_csv(label_frame, labels_path / (label_name + '.csv'))
 
 
 if __name__ == "__main__":
