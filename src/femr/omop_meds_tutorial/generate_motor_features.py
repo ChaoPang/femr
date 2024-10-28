@@ -23,10 +23,16 @@ def main():
             labels = pd.read_parquet(
                 pretraining_data / "labels" / (label_name + '.parquet')
             )
+            typed_labels = [
+                meds.Label(
+                    subject_id = label["subject_id"], prediction_time=label["prediction_time"],boolean_value=label["boolean_value"],
+                )
+                for label in labels.to_dict(orient="records")
+            ]
             features = femr.models.transformer.compute_features(
                 db=database,
                 model_path=str(pretraining_data / "motor_model"),
-                labels=labels.to_dict(orient="records"),
+                labels=typed_labels,
                 ontology=ontology,
                 device=torch.device('cuda'),
                 tokens_per_batch=32 * 1024,

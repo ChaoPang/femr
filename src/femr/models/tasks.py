@@ -66,7 +66,7 @@ class LabeledSubjectTask(Task):
 
         self.label_map: Mapping[int, Any] = collections.defaultdict(list)
         for label in labels:
-            self.label_map[label.subject_id].append(label._asdict())
+            self.label_map[label["subject_id"]].append(label)
 
         for k, v in self.label_map.items():
             v.sort(key=lambda a: a["prediction_time"])
@@ -94,6 +94,7 @@ class LabeledSubjectTask(Task):
             current_date: datetime.datetime,
             next_date: Optional[datetime.datetime],
             next_features: Optional[Sequence[int]] = None,
+            actually_add: Optional[bool] = True,
     ) -> int:
         has_label = False
 
