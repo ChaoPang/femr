@@ -29,9 +29,11 @@ class OmopInpatientMortalityLabeler(femr.labelers.Labeler):
         death_times = set()
 
         for event in subject.events:
-            if event.code in ADMISSION_EVENTS:
-                admission_ranges.add((event.time, datetime.datetime.fromisoformat(event.end)))
-
+            if event.code in ADMISSION_EVENTS and event.end is not None:
+                if isinstance(event.end, datetime.datetime):
+                    admission_ranges.add((event.time, event.end))
+                else:
+                    admission_ranges.add((event.time, datetime.datetime.fromisoformat(event.end)))
             if event.code == meds.death_code:
                 death_times.add(event.time)
 
@@ -68,8 +70,11 @@ class OmopLongAdmissionLabeler(femr.labelers.Labeler):
         admission_ranges = set()
 
         for event in subject.events:
-            if event.code in ADMISSION_EVENTS:
-                admission_ranges.add((event.time, datetime.datetime.fromisoformat(event.end)))
+            if event.code in ADMISSION_EVENTS and event.end is not None:
+                if isinstance(event.end, datetime.datetime):
+                    admission_ranges.add((event.time, event.end))
+                else:
+                    admission_ranges.add((event.time, datetime.datetime.fromisoformat(event.end)))
 
         labels = []
         for (admission_start, admission_end) in admission_ranges:
