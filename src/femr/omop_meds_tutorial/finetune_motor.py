@@ -16,7 +16,6 @@ from .generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
 
 
 def main():
-
     args = create_omop_meds_tutorial_arg_parser().parse_args()
     pretraining_data = pathlib.Path(args.pretraining_data)
     models_path = pretraining_data / "models"
@@ -26,7 +25,7 @@ def main():
 
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in LABEL_NAMES:
-            labels = pd.read_parquet(models_path.parent / (label_name + '.parquet'))
+            labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
             with open(models_path.parent / 'features' / (label_name + '_motor.pkl'), 'rb') as f:
                 features = pickle.load(f)
             labeled_features = femr.featurizers.join_labels(features, labels)
