@@ -94,7 +94,7 @@ def main():
 
             lightgbm_study = optuna.create_study()  # Create a new study.
             lightgbm_study.optimize(functools.partial(lightgbm_objective, train_data=train_data, dev_data=dev_data),
-                                    n_trials=100)  # Invoke optimization of the objective function.
+                                    n_trials=10)  # Invoke optimization of the objective function.
 
             final_train_data = apply_mask(labeled_features, train_mask | dev_mask)
 
