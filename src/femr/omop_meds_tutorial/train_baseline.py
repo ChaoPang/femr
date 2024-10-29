@@ -66,8 +66,9 @@ def main():
             with open(models_path.parent / 'features' / (label_name + '.pkl'), 'rb') as f:
                 features = pickle.load(f)
 
-            with open(models_path.parent / 'features' / (label_name + '_featurizer.pkl'), 'rb') as f:
-                feautrizer: femr.featurizers.FeaturizerList = pickle.load(f)
+            # Remove the labels that do not have features generated
+            labels = labels[labels.subject_id.isin(features["subject_ids"])]
+            labels = labels.sort_values(["subject_id", "prediction_time"])
 
             labeled_features = femr.featurizers.join_labels(features, labels)
             main_split = femr.splits.SubjectSplit.load_from_csv(str(models_path.parent / 'main_split.csv'))
