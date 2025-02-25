@@ -280,10 +280,14 @@ class MOTORTask(Task):
             num_tasks: int,
             num_bins: int,
             final_layer_size: int,
+            codes_to_skip: List[str] = None,
     ) -> MOTORTask:
         tasks = []
         for dict_entry in tokenizer.dictionary["vocab"]:
             if dict_entry["type"] == "code":
+                # Skip the codes that are in the codes_to_skip
+                if codes_to_skip and dict_entry["code_string"] in codes_to_skip:
+                    continue
                 tasks.append(dict_entry["code_string"])
                 if len(tasks) == num_tasks:
                     break

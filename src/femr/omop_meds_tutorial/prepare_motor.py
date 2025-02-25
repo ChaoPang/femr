@@ -7,7 +7,7 @@ from femr.models.tokenizer.hierarchical_tokenizer import HierarchicalTokenizer
 import femr.models.tasks
 import femr.models.processor
 import pandas as pd
-from meds import subject_splits_filepath
+import polars as pl
 
 
 def main(args):
@@ -15,6 +15,11 @@ def main(args):
     meds_reader_path = pathlib.Path(args.meds_reader)
     subject_splits_path = meds_reader_path / "metadata/subject_splits.parquet"
     code_metadata_path = meds_reader_path / "metadata/codes.parquet"
+    codes_to_skip = []
+    if args.codes_to_skip:
+        codes_to_remove = pl.read_parquet(args.codes_to_skip)
+        codes_to_skip = codes_to_remove["code"].to_list()
+
 
     with meds_reader.SubjectDatabase(str(meds_reader_path), num_threads=32) as database:
         subject_ids = [_ for _ in database]
@@ -68,7 +73,12 @@ def main(args):
             print("Train MOTOR task")
 
             motor_task = femr.models.tasks.MOTORTask.fit_pretraining_task_info(
-                main_database, tokenizer, num_tasks=8 * 1024, num_bins=8, final_layer_size=512)
+                main_database, tokenizer,
+                num_tasks=8 * 1024,
+                num_bins=8,
+                final_layer_size=512,
+                codes_to_skip=codes_to_skip
+            )
 
             with open(task_path, 'wb') as f:
                 pickle.dump(motor_task, f)
@@ -128,6 +138,12 @@ def create_omop_meds_tutorial_argparser():
         dest="athena_path",
         action="store",
         required=True,
+    )
+    parser.add_argument(
+        "--codes_to_skip",
+        dest="codes_to_skip",
+        action="store",
+        required=False,
     )
     return parser
 
