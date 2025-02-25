@@ -16,9 +16,9 @@ def main(args):
     subject_splits_path = meds_reader_path / "metadata/subject_splits.parquet"
     code_metadata_path = meds_reader_path / "metadata/codes.parquet"
     codes_to_skip = []
-    if args.codes_to_skip:
-        codes_to_remove = pl.read_parquet(args.codes_to_skip)
-        codes_to_skip = codes_to_remove["code"].to_list()
+    if args.motor_codes_to_skip:
+        codes_to_skip = pl.read_parquet(args.motor_codes_to_skip)
+        codes_to_skip = codes_to_skip["code"].to_list()
 
 
     with meds_reader.SubjectDatabase(str(meds_reader_path), num_threads=32) as database:
@@ -140,8 +140,8 @@ def create_omop_meds_tutorial_argparser():
         required=True,
     )
     parser.add_argument(
-        "--codes_to_skip",
-        dest="codes_to_skip",
+        "--motor_codes_to_skip",
+        dest="motor_codes_to_skip",
         action="store",
         required=False,
     )
