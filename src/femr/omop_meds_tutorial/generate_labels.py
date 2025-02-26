@@ -13,8 +13,8 @@ import shutil
 from typing import List, Mapping
 from pathlib import Path
 
-# LABEL_NAMES = ['death', 'long_los']
-LABEL_NAMES = ['long_los', '30d']
+LABEL_NAMES = ['death', 'long_los']
+# LABEL_NAMES = ['long_los', '30d']
 ADMISSION_EVENTS = ["Visit/IP", "Visit/ERIP", "CMS Place of Service/51", "CMS Place of Service/61"]
 
 
@@ -35,7 +35,8 @@ class OmopInpatientMortalityLabeler(femr.labelers.Labeler):
             if event.code == meds.death_code:
                 death_times.add(event.time)
 
-        assert len(death_times) in (0, 1)
+        if len(death_times) not in [0, 1]:
+            print(f"Warning: found {len(death_times)} death events in subject: {subject.subject_id}")
 
         if len(death_times) == 1:
             death_time = list(death_times)[0]
