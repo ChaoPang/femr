@@ -1,7 +1,7 @@
 """
 FEMR also supports generating tabular feature representations, an important baseline for EHR modeling
 """
-
+import os
 import shutil
 import meds_reader
 import pandas as pd
@@ -15,16 +15,35 @@ import femr.splits
 from .generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
 
 
+def create_arg_parser():
+    args = create_omop_meds_tutorial_arg_parser()
+    args.add_argument(
+        "--cohort_label",
+        dest="cohort_label",
+        default=None,
+    )
+    return args
+
+
 def main():
-    args = create_omop_meds_tutorial_arg_parser().parse_args()
+    args = create_arg_parser().parse_args()
     pretraining_data = pathlib.Path(args.pretraining_data)
     models_path = pretraining_data / "models"
     if models_path.exists():
         shutil.rmtree(models_path)
     models_path.mkdir(exist_ok=True)
 
+    labels = LABEL_NAMES
+    if args.cohort_label is not None:
+        label_path = models_path.parent / "labels" / (args.cohort_label + '.parquet')
+        if label_path.exists():
+            print(f"Using the user defined label at: {label_path}")
+            labels = [args.cohort_label]
+        else:
+            raise RuntimeError(f"The user provided label does not exist at {label_path}")
+
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
-        for label_name in LABEL_NAMES:
+        for label_name in labels:
             labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
             with open(models_path.parent / 'features' / (label_name + '_motor.pkl'), 'rb') as f:
                 features = pickle.load(f)
