@@ -2,6 +2,7 @@
 FEMR also supports generating tabular feature representations, an important baseline for EHR modeling
 """
 import os
+import json
 import shutil
 import meds_reader
 import pandas as pd
@@ -44,6 +45,10 @@ def main():
 
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in labels:
+            test_result_file = models_path.parent / "labels" / (label_name + '_test_results.json')
+            if test_result_file.exists():
+                print(f"The result already existed for {label_name} at {test_result_file}, it will be skipped!")
+                continue
             labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
             with open(models_path.parent / 'features' / (label_name + '_motor.pkl'), 'rb') as f:
                 features = pickle.load(f)
@@ -78,9 +83,17 @@ def main():
 
             y_pred = model.predict_log_proba(test_data['features'])[:, 1]
 
-            final_auroc = sklearn.metrics.roc_auc_score(test_data['boolean_values'], y_pred)
+            roc_auc = sklearn.metrics.roc_auc_score(test_data['boolean_values'], y_pred)
+            precision, recall, _ = sklearn.metrics.precision_recall_curve(test_data['boolean_values'], y_pred)
+            pr_auc = sklearn.metrics.auc(recall, precision)
 
-            print(label_name, final_auroc)
+            metrics = {
+                "roc_auc": roc_auc,
+                "pr_auc": pr_auc
+            }
+            print(label_name, roc_auc)
+            with open(test_result_file, "w") as f:
+                json.dump(metrics, f, indent=4)
 
 
 if __name__ == "__main__":
