@@ -2,16 +2,32 @@ import femr.transforms
 import meds_reader
 import femr.models.transformer
 import pandas as pd
-import os
 import pickle
 import meds
 import pathlib
 import torch
 from .generate_labels import create_omop_meds_tutorial_arg_parser, LABEL_NAMES
 
+def create_arg_parser():
+    args = create_omop_meds_tutorial_arg_parser()
+    args.add_argument(
+        "num_proc",
+        type=int,
+        required=False,
+        default=6,
+        help="Number of processes to use"
+    )
+    args.add_argument(
+        "tokens_per_batch",
+        type=int,
+        required=False,
+        default=32 * 1024,
+        help="The number of tokens per batch to use"
+    )
+    return args
 
 def main():
-    args = create_omop_meds_tutorial_arg_parser().parse_args()
+    args = create_arg_parser().parse_args()
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         pretraining_data = pathlib.Path(args.pretraining_data)
         ontology_path = pretraining_data / 'ontology.pkl'
@@ -37,8 +53,8 @@ def main():
                 labels=typed_labels,
                 ontology=ontology,
                 device=torch.device('cuda'),
-                tokens_per_batch=32 * 1024,
-                num_proc=6
+                tokens_per_batch=args.tokens_per_batch,
+                num_proc=args.num_proc,
             )
             with open(pretraining_data / "features" / (label_name + '_motor.pkl'), 'wb') as f:
                 pickle.dump(features, f)

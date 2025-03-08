@@ -121,7 +121,7 @@ Step 9. Generate MOTOR Embedddings
 We can then use MOTOR as an embedding model to obtain patient representations
 
 ```bash
-python -u -m femr.omop_meds_tutorial.generate_motor_features \ 
+python -u -m femr.omop_meds_tutorial.generate_motor_features \
   --pretraining_data $PRETRAINING_DATA \
   --meds_reader $OMOP_MEDS_READER
 ```
