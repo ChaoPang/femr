@@ -12,6 +12,12 @@ from .generate_labels import create_omop_meds_tutorial_arg_parser
 def create_arg_parser():
     arg_parser = create_omop_meds_tutorial_arg_parser()
     arg_parser.add_argument(
+        "--checkpoint_dir",
+        dest="checkpoint_dir",
+        type=str,
+        default=None
+    )
+    arg_parser.add_argument(
         "--learning_rate",
         dest="learning_rate",
         type=float,
@@ -130,7 +136,7 @@ def main():
         args=trainer_config,
     )
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=args.checkpoint_dir)
 
 
 if __name__ == "__main__":
