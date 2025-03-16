@@ -1,8 +1,10 @@
 """
 FEMR also supports generating tabular feature representations, an important baseline for EHR modeling
 """
-
+import os
+import glob
 import shutil
+import pathlib
 import meds_reader
 import pandas as pd
 import femr.featurizers
@@ -10,17 +12,51 @@ import pickle
 from pathlib import Path
 from .generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
 
+def create_arg_parser():
+    args = create_omop_meds_tutorial_arg_parser()
+    args.add_argument(
+        "--cohort_dir",
+        dest="cohort_dir",
+        default=None,
+    )
+    return args
+
+def read_recursive_parquet(root_dir):
+    all_files = glob.glob(os.path.join(root_dir, '**', '*.parquet'), recursive=True)
+    df = pd.concat((pd.read_parquet(f) for f in all_files), ignore_index=True)
+    return df
+
+
 def main():
 
-    args = create_omop_meds_tutorial_arg_parser().parse_args()
+    args = create_arg_parser().parse_args()
 
     features_path = Path(args.pretraining_data) / "features"
     if features_path.exists():
         shutil.rmtree(str(features_path))
     features_path.mkdir(exist_ok=False)
+    pretraining_data = pathlib.Path(args.pretraining_data)
+    labels = LABEL_NAMES
+    if args.cohort_dir is not None:
+        if os.path.isdir(args.cohort_dir):
+            label_name = os.path.basename(os.path.normpath(args.cohort_dir))
+            cohort = read_recursive_parquet(args.cohort_dir)
+        else:
+            label_name = os.path.basename(os.path.splitext(args.cohort_dir)[0])
+            file_extension = os.path.splitext(args.cohort_dir)[1]
+            if file_extension.lower() == ".parquet":
+                cohort = pd.read_parquet(args.cohort_dir)
+            elif file_extension.lower() == ".csv":
+                cohort = pd.read_csv(args.cohort_dir)
+            else:
+                raise RuntimeError(f"Unknown file extension: {file_extension}")
+        cohort.to_parquet(
+            pretraining_data / "labels" / (label_name + '.parquet')
+        )
+        labels = [label_name]
 
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=32) as database:
-        for label_name in LABEL_NAMES:
+        for label_name in labels:
             labels = pd.read_parquet(
                 features_path.parent / "labels"  / (label_name + '.parquet')
             )
