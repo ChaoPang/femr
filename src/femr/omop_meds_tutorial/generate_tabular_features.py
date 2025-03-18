@@ -8,13 +8,17 @@ import pandas as pd
 import femr.featurizers
 import pickle
 from pathlib import Path
-from .generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
+from generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
+
+
+
 
 def main():
 
     args = create_omop_meds_tutorial_arg_parser().parse_args()
 
     features_path = Path(args.pretraining_data) / "features"
+    
     if features_path.exists():
         shutil.rmtree(str(features_path))
     features_path.mkdir(exist_ok=False)

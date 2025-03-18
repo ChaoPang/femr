@@ -16,6 +16,16 @@ import functools
 import lightgbm as lgb
 from .generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
 
+import pickle
+import json
+
+def save_to_json(data, filename):
+    with open(filename, 'w') as f:
+        json.dump(data, f, indent=4)
+
+def save_to_pickle(data, filename):
+    with open(filename, 'wb') as f:
+        pickle.dump(data, f)
 
 def lightgbm_objective(trial, *, train_data, dev_data, num_trees=None):
     param = {
@@ -52,18 +62,19 @@ def lightgbm_objective(trial, *, train_data, dev_data, num_trees=None):
 
 
 
+
 def main():
     from pathlib import Path
     args = create_omop_meds_tutorial_arg_parser().parse_args()
-    models_path = Path(args.pretraining_data) / "models"
-    if models_path.exists():
-        shutil.rmtree(str(models_path))
+    models_path = Path(args.pretraining_data) / "models_baseline"
+    # if models_path.exists():
+        # shutil.rmtree(str(models_path))
     models_path.mkdir(exist_ok=False)
 
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in LABEL_NAMES:
             labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
-            with open(models_path.parent / 'features' / (label_name + '.pkl'), 'rb') as f:
+            with open(models_path.parent / 'features_tabular' / (label_name + '.pkl'), 'rb') as f:
                 features = pickle.load(f)
 
             # Remove the labels that do not have features generated
@@ -99,19 +110,55 @@ def main():
 
             final_train_data = apply_mask(labeled_features, train_mask | dev_mask)
 
+            print("Computing predictions")
+            best_num_trees = lightgbm_study.best_trial.user_attrs['num_trees']
+            best_params = lightgbm_study.best_trial.params
+            best_params.update({"objective": "binary", "metric": "auc", "verbosity": -1})
+            dtrain_final = lgb.Dataset(final_train_data['features'], label=final_train_data['boolean_values'])
+            gbm_final = lgb.train(best_params, dtrain_final, num_boost_round=best_num_trees)
+
+            # Generate predictions on test data.
+            lightgbm_preds = gbm_final.predict(test_data['features'], raw_score=True)   
+            final_lightgbm_auroc2 = -sklearn.metrics.roc_auc_score(test_data['boolean_values'], lightgbm_preds)
+
             final_lightgbm_auroc = lightgbm_objective(lightgbm_study.best_trial, train_data=final_train_data,
                                                       dev_data=test_data,
                                                       num_trees=lightgbm_study.best_trial.user_attrs['num_trees'])
             print(label_name)
 
+            print("Saving predictions")
+
             print('lightgbm', final_lightgbm_auroc, label_name)
+            lightgbm_results = {
+                "label_name": label_name,
+                "final_lightgbm_auroc": final_lightgbm_auroc,
+                "final_lightgbm_auroc2": final_lightgbm_auroc2,
+            }
+            save_to_json(lightgbm_results, f'lightgbm_results_{label_name}.json')
+            lightgbm_predictions = {
+                "subject_ids": test_data["subject_ids"].tolist(),
+                "predictions": lightgbm_preds.tolist()
+            }
+            save_to_json(lightgbm_predictions, f'lightgbm_predictions_{label_name}.json')
+
 
             logistic_model = LogisticRegressionCV(scoring='roc_auc')
             logistic_model.fit(final_train_data['features'], final_train_data['boolean_values'])
             logistic_y_pred = logistic_model.predict_log_proba(test_data['features'])[:, 1]
             final_logistic_auroc = sklearn.metrics.roc_auc_score(test_data['boolean_values'], logistic_y_pred)
 
+
             print('logistic', final_logistic_auroc, label_name)
+            logistic_results = {
+                "label_name": label_name,
+                "final_logistic_auroc": final_logistic_auroc
+            }
+            save_to_json(logistic_results, f'logistic_results_{label_name}.json')
+            logistic_predictions = {
+                "subject_ids": test_data["subject_ids"].tolist(),
+                "predictions": logistic_y_pred.tolist()
+            }
+            save_to_json(logistic_predictions, f'logistic_predictions_{label_name}.json')
 
 
 if __name__ == "__main__":
