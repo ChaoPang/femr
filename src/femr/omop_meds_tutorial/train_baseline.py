@@ -95,7 +95,7 @@ def main():
             label_output_dir.mkdir(exist_ok=True)
 
             labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
-            with open(models_path.parent / 'features_tabular' / (label_name + '.pkl'), 'rb') as f:
+            with open(models_path.parent / 'features' / (label_name + '.pkl'), 'rb') as f:
                 features = pickle.load(f)
 
             # Remove the labels that do not have features generated
