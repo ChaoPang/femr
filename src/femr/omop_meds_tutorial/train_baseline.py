@@ -69,6 +69,7 @@ def create_arg_parser():
 
 
 
+
 def main():
     from pathlib import Path
     args = create_omop_meds_tutorial_arg_parser().parse_args()
@@ -94,7 +95,7 @@ def main():
             label_output_dir.mkdir(exist_ok=True)
 
             labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
-            with open(models_path.parent / 'features' / (label_name + '.pkl'), 'rb') as f:
+            with open(models_path.parent / 'features_tabular' / (label_name + '.pkl'), 'rb') as f:
                 features = pickle.load(f)
 
             # Remove the labels that do not have features generated
@@ -133,6 +134,17 @@ def main():
                 lightgbm_study.optimize(functools.partial(lightgbm_objective, train_data=train_data, dev_data=dev_data),
                                         n_trials=10)  # Invoke optimization of the objective function.
             final_train_data = apply_mask(labeled_features, train_mask | dev_mask)
+            print("Computing predictions")
+            best_num_trees = lightgbm_study.best_trial.user_attrs['num_trees']
+            best_params = lightgbm_study.best_trial.params
+            best_params.update({"objective": "binary", "metric": "auc", "verbosity": -1})
+            dtrain_final = lgb.Dataset(final_train_data['features'], label=final_train_data['boolean_values'])
+            gbm_final = lgb.train(best_params, dtrain_final, num_boost_round=best_num_trees)
+
+            # Generate predictions on test data.
+            lightgbm_preds = gbm_final.predict(test_data['features'], raw_score=True)   
+            final_lightgbm_auroc2 = -sklearn.metrics.roc_auc_score(test_data['boolean_values'], lightgbm_preds)
+
             print("Computing predictions")
             best_num_trees = lightgbm_study.best_trial.user_attrs['num_trees']
             best_params = lightgbm_study.best_trial.params
