@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Default values
 SCRIPT_NAME=$(basename "$0")
@@ -29,8 +29,9 @@ show_help() {
 # Parse command line options
 PRETRAINING_DATA_ARG=""
 OMOP_MEDS_READER_ARG=""
+COHORT_BASE_DIR=""
 
-while [[ $# -gt 0 ]]; do
+while [ $# -gt 0 ]; do
     case $1 in
         -h|--help)
             show_help
@@ -71,8 +72,13 @@ if [ -z "$COHORT_BASE_DIR" ]; then
 fi
 
 # Use command line arguments if provided, otherwise use environment variables
-PRETRAINING_DATA=${PRETRAINING_DATA_ARG:-$PRETRAINING_DATA}
-OMOP_MEDS_READER=${OMOP_MEDS_READER_ARG:-$OMOP_MEDS_READER}
+if [ -n "$PRETRAINING_DATA_ARG" ]; then
+    PRETRAINING_DATA="$PRETRAINING_DATA_ARG"
+fi
+
+if [ -n "$OMOP_MEDS_READER_ARG" ]; then
+    OMOP_MEDS_READER="$OMOP_MEDS_READER_ARG"
+fi
 
 # Check if the required variables are set
 if [ -z "$PRETRAINING_DATA" ] || [ -z "$OMOP_MEDS_READER" ]; then
@@ -106,7 +112,7 @@ for TASK_DIR in "$COHORT_BASE_DIR"*/; do
 
     # Extract task name (directory name)
     TASK_NAME=$(basename "$TASK_DIR")
-    ((TASK_COUNT++))
+    TASK_COUNT=$((TASK_COUNT + 1))
 
     echo "[$TASK_COUNT] Found task: $TASK_NAME"
 done
@@ -129,7 +135,7 @@ for TASK_DIR in "$COHORT_BASE_DIR"*/; do
 
     # Extract task name (directory name)
     TASK_NAME=$(basename "$TASK_DIR")
-    ((CURRENT++))
+    CURRENT=$((CURRENT + 1))
 
     echo "[$CURRENT/$TASK_COUNT] Processing task: $TASK_NAME"
     echo "Task directory: $TASK_DIR"
