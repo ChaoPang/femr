@@ -43,9 +43,12 @@ def main():
         else:
             raise RuntimeError(f"The user provided label does not exist at {label_path}")
 
+    output_dir = models_path.parent / "results"
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in labels:
-            test_result_file = models_path.parent / "labels" / (label_name + '_test_results.json')
+            label_output_dir = output_dir / label_name
+            label_output_dir.mkdir(exist_ok=True)
+            test_result_file = label_output_dir / (label_name + '_motor_test_results.json')
             if test_result_file.exists():
                 print(f"The result already existed for {label_name} at {test_result_file}, it will be skipped!")
                 continue
@@ -88,8 +91,8 @@ def main():
             pr_auc = sklearn.metrics.auc(recall, precision)
 
             metrics = {
-                "roc_auc": roc_auc,
-                "pr_auc": pr_auc
+                "auroc": roc_auc,
+                "aucpr": pr_auc
             }
             print(label_name, roc_auc)
             with open(test_result_file, "w") as f:
