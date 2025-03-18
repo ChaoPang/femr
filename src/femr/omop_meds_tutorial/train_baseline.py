@@ -74,7 +74,7 @@ def main():
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in LABEL_NAMES:
             labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
-            with open(models_path.parent / 'features_tabular' / (label_name + '.pkl'), 'rb') as f:
+            with open(models_path.parent / 'features' / (label_name + '.pkl'), 'rb') as f:
                 features = pickle.load(f)
 
             # Remove the labels that do not have features generated
