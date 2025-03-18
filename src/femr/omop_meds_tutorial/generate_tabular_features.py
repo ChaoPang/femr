@@ -5,6 +5,7 @@ import os
 import glob
 import shutil
 import pathlib
+import datetime
 import meds_reader
 import pandas as pd
 import femr.featurizers
@@ -50,6 +51,9 @@ def main():
                 cohort = pd.read_csv(args.cohort_dir)
             else:
                 raise RuntimeError(f"Unknown file extension: {file_extension}")
+        # We need to cast prediction_time to datetime
+        if len(cohort) > 0 and isinstance(cohort.prediction_time.iloc[0], datetime.date):
+            cohort["prediction_time"] = pd.to_datetime(cohort["prediction_time"])
         cohort.to_parquet(
             pretraining_data / "labels" / (label_name + '.parquet')
         )
