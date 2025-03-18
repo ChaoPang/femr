@@ -1,3 +1,5 @@
+.idea
+pythonProject
 .vscode
 __pycache__
 *.so
