@@ -34,11 +34,7 @@ def read_recursive_parquet(root_dir):
 def main():
 
     args = create_arg_parser().parse_args()
-
     features_path = Path(args.pretraining_data) / "features"
-    
-    if features_path.exists():
-        shutil.rmtree(str(features_path))
     features_path.mkdir(exist_ok=False)
     pretraining_data = pathlib.Path(args.pretraining_data)
     labels = LABEL_NAMES

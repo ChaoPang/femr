@@ -127,8 +127,6 @@ def main():
     args = create_omop_meds_tutorial_arg_parser().parse_args()
     
     labels_path = Path(args.pretraining_data) / "labels"
-    if labels_path.exists():
-        shutil.rmtree(str(labels_path))
     labels_path.mkdir(exist_ok=False)
 
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:

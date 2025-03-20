@@ -125,75 +125,73 @@ def main():
             dev_data = apply_mask(labeled_features, dev_mask)
             test_data = apply_mask(labeled_features, test_mask)
 
+            gbm_output_dir = label_output_dir / "gbm"
+            gbm_output_dir.mkdir(exist_ok=True, parents=True)
 
-            gbm_result_file = label_output_dir / (label_name + '_gbm_test_results.json')
-            if gbm_result_file.exists():
-                print(f"The result already exists for GBM {label_name} at {gbm_result_file}, it will be skipped!")
+            gbm_metrics_output_file = gbm_output_dir / f'lightgbm_results_{label_name}.json'
+            if gbm_metrics_output_file.exists():
+                print(f"The result already exists for GBM {label_name} at {gbm_metrics_output_file}, it will be skipped!")
             else:
                 lightgbm_study = optuna.create_study()  # Create a new study.
-                lightgbm_study.optimize(functools.partial(lightgbm_objective, train_data=train_data, dev_data=dev_data),
-                                        n_trials=10)  # Invoke optimization of the objective function.
-            final_train_data = apply_mask(labeled_features, train_mask | dev_mask)
-            print("Computing predictions")
-            best_num_trees = lightgbm_study.best_trial.user_attrs['num_trees']
-            best_params = lightgbm_study.best_trial.params
-            best_params.update({"objective": "binary", "metric": "auc", "verbosity": -1})
-            dtrain_final = lgb.Dataset(final_train_data['features'], label=final_train_data['boolean_values'])
-            gbm_final = lgb.train(best_params, dtrain_final, num_boost_round=best_num_trees)
+                lightgbm_study.optimize(functools.partial(lightgbm_objective, train_data=train_data, dev_data=dev_data),  n_trials=10)  # Invoke optimization of the objective function.
 
-            # Generate predictions on test data.
-            lightgbm_preds = gbm_final.predict(test_data['features'], raw_score=True)   
-            final_lightgbm_auroc2 = -sklearn.metrics.roc_auc_score(test_data['boolean_values'], lightgbm_preds)
+                final_train_data = apply_mask(labeled_features, train_mask | dev_mask)
+                print("Computing predictions")
+                best_num_trees = lightgbm_study.best_trial.user_attrs['num_trees']
+                best_params = lightgbm_study.best_trial.params
+                best_params.update({"objective": "binary", "metric": "auc", "verbosity": -1})
+                dtrain_final = lgb.Dataset(final_train_data['features'], label=final_train_data['boolean_values'])
+                gbm_final = lgb.train(best_params, dtrain_final, num_boost_round=best_num_trees)
 
-            print("Computing predictions")
-            best_num_trees = lightgbm_study.best_trial.user_attrs['num_trees']
-            best_params = lightgbm_study.best_trial.params
-            best_params.update({"objective": "binary", "metric": "auc", "verbosity": -1})
-            dtrain_final = lgb.Dataset(final_train_data['features'], label=final_train_data['boolean_values'])
-            gbm_final = lgb.train(best_params, dtrain_final, num_boost_round=best_num_trees)
+                # Generate predictions on test data.
+                lightgbm_preds = gbm_final.predict(test_data['features'], raw_score=True)
+                final_lightgbm_auroc2 = -sklearn.metrics.roc_auc_score(test_data['boolean_values'], lightgbm_preds)
 
-            # Generate predictions on test data.
-            lightgbm_preds = gbm_final.predict(test_data['features'], raw_score=True)   
-            final_lightgbm_auroc2 = -sklearn.metrics.roc_auc_score(test_data['boolean_values'], lightgbm_preds)
+                final_lightgbm_auroc = lightgbm_objective(lightgbm_study.best_trial, train_data=final_train_data,
+                                                          dev_data=test_data,
+                                                          num_trees=lightgbm_study.best_trial.user_attrs['num_trees'])
+                print(label_name)
 
-            final_lightgbm_auroc = lightgbm_objective(lightgbm_study.best_trial, train_data=final_train_data,
-                                                      dev_data=test_data,
-                                                      num_trees=lightgbm_study.best_trial.user_attrs['num_trees'])
-            print(label_name)
+                print("Saving predictions")
 
-            print("Saving predictions")
+                print('lightgbm', final_lightgbm_auroc, label_name)
+                lightgbm_results = {
+                    "label_name": label_name,
+                    "final_lightgbm_auroc": final_lightgbm_auroc,
+                    "final_lightgbm_auroc2": final_lightgbm_auroc2,
+                }
 
-            print('lightgbm', final_lightgbm_auroc, label_name)
-            lightgbm_results = {
-                "label_name": label_name,
-                "final_lightgbm_auroc": final_lightgbm_auroc,
-                "final_lightgbm_auroc2": final_lightgbm_auroc2,
-            }
-            save_to_json(lightgbm_results, f'lightgbm_results_{label_name}.json')
-            lightgbm_predictions = {
-                "subject_ids": test_data["subject_ids"].tolist(),
-                "predictions": lightgbm_preds.tolist()
-            }
-            save_to_json(lightgbm_predictions, f'lightgbm_predictions_{label_name}.json')
+                save_to_json(lightgbm_results, gbm_metrics_output_file)
+                lightgbm_predictions = {
+                    "subject_ids": test_data["subject_ids"].tolist(),
+                    "predictions": lightgbm_preds.tolist()
+                }
+                save_to_json(lightgbm_predictions, gbm_output_dir / f'lightgbm_predictions_{label_name}.json')
 
-
-            logistic_model = LogisticRegressionCV(scoring='roc_auc')
-            logistic_model.fit(final_train_data['features'], final_train_data['boolean_values'])
-            logistic_y_pred = logistic_model.predict_log_proba(test_data['features'])[:, 1]
-            final_logistic_auroc = sklearn.metrics.roc_auc_score(test_data['boolean_values'], logistic_y_pred)
+            logistic_metrics_output_file = logistic_output_dir / f'logistic_results_{label_name}.json'
+            if logistic_metrics_output_file.exists():
+                print(f"The result already exists for Logistic {label_name} at {logistic_metrics_output_file}, it will be skipped!")
+            else:
+                logistic_output_dir = label_output_dir / "logistic"
+                logistic_output_dir.mkdir(exist_ok=True, parents=True)
+                logistic_model = LogisticRegressionCV(scoring='roc_auc')
+                logistic_model.fit(final_train_data['features'], final_train_data['boolean_values'])
+                logistic_y_pred = logistic_model.predict_log_proba(test_data['features'])[:, 1]
+                final_logistic_auroc = sklearn.metrics.roc_auc_score(test_data['boolean_values'], logistic_y_pred)
 
 
-            print('logistic', final_logistic_auroc, label_name)
-            logistic_results = {
-                "label_name": label_name,
-                "final_logistic_auroc": final_logistic_auroc
-            }
-            save_to_json(logistic_results, f'logistic_results_{label_name}.json')
-            logistic_predictions = {
-                "subject_ids": test_data["subject_ids"].tolist(),
-                "predictions": logistic_y_pred.tolist()
-            }
-            save_to_json(logistic_predictions, f'logistic_predictions_{label_name}.json')
+                print('logistic', final_logistic_auroc, label_name)
+                logistic_results = {
+                    "label_name": label_name,
+                    "final_logistic_auroc": final_logistic_auroc
+                }
+
+                save_to_json(logistic_results, logistic_metrics_output_file)
+                logistic_predictions = {
+                    "subject_ids": test_data["subject_ids"].tolist(),
+                    "predictions": logistic_y_pred.tolist()
+                }
+                save_to_json(logistic_predictions, logistic_output_dir / f'logistic_predictions_{label_name}.json')
 
 
 if __name__ == "__main__":
