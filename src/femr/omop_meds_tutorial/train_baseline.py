@@ -17,13 +17,16 @@ from .generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
 import pickle
 import json
 
+
 def save_to_json(data, filename):
     with open(filename, 'w') as f:
         json.dump(data, f, indent=4)
 
+
 def save_to_pickle(data, filename):
     with open(filename, 'wb') as f:
         pickle.dump(data, f)
+
 
 def lightgbm_objective(trial, *, train_data, dev_data, num_trees=None):
     param = {
@@ -58,6 +61,7 @@ def lightgbm_objective(trial, *, train_data, dev_data, num_trees=None):
 
     return error
 
+
 def create_arg_parser():
     args = create_omop_meds_tutorial_arg_parser()
     args.add_argument(
@@ -68,14 +72,12 @@ def create_arg_parser():
     return args
 
 
-
-
 def main():
     from pathlib import Path
     args = create_arg_parser().parse_args()
     models_path = Path(args.pretraining_data) / "models_baseline"
     # if models_path.exists():
-        # shutil.rmtree(str(models_path))
+    # shutil.rmtree(str(models_path))
     models_path.mkdir(exist_ok=False)
 
     labels = LABEL_NAMES
@@ -128,12 +130,14 @@ def main():
             gbm_output_dir = label_output_dir / "gbm"
             gbm_output_dir.mkdir(exist_ok=True, parents=True)
 
-            gbm_metrics_output_file = gbm_output_dir / f'lightgbm_results_{label_name}.json'
+            gbm_metrics_output_file = gbm_output_dir / f'metrics.json'
             if gbm_metrics_output_file.exists():
-                print(f"The result already exists for GBM {label_name} at {gbm_metrics_output_file}, it will be skipped!")
+                print(
+                    f"The result already exists for GBM {label_name} at {gbm_metrics_output_file}, it will be skipped!")
             else:
                 lightgbm_study = optuna.create_study()  # Create a new study.
-                lightgbm_study.optimize(functools.partial(lightgbm_objective, train_data=train_data, dev_data=dev_data),  n_trials=10)  # Invoke optimization of the objective function.
+                lightgbm_study.optimize(functools.partial(lightgbm_objective, train_data=train_data, dev_data=dev_data),
+                                        n_trials=10)  # Invoke optimization of the objective function.
 
                 final_train_data = apply_mask(labeled_features, train_mask | dev_mask)
                 print("Computing predictions")
@@ -162,15 +166,20 @@ def main():
                 }
 
                 save_to_json(lightgbm_results, gbm_metrics_output_file)
-                lightgbm_predictions = {
-                    "subject_ids": test_data["subject_ids"].tolist(),
-                    "predictions": lightgbm_preds.tolist()
-                }
-                save_to_json(lightgbm_predictions, gbm_output_dir / f'lightgbm_predictions_{label_name}.json')
+                lightgbm_predictions = pd.DataFrame({
+                    "subject_id": test_data["subject_ids"].tolist(),
+                    "prediction_time": test_data["prediction_time"].tolist(),
+                    "boolean_prediction_probability": lightgbm_preds.tolist(),
+                    "boolean_value": test_data["boolean_values"].tolist()
+                })
+                gbm_test_predictions = gbm_output_dir / "test_predictions"
+                gbm_test_predictions.mkdir(exist_ok=True, parents=True)
+                lightgbm_predictions.to_parquet(gbm_test_predictions / "test_gbm_predictions.parquet")
 
-            logistic_metrics_output_file = logistic_output_dir / f'logistic_results_{label_name}.json'
+            logistic_metrics_output_file = logistic_output_dir / f'metrics.json'
             if logistic_metrics_output_file.exists():
-                print(f"The result already exists for Logistic {label_name} at {logistic_metrics_output_file}, it will be skipped!")
+                print(
+                    f"The result already exists for Logistic {label_name} at {logistic_metrics_output_file}, it will be skipped!")
             else:
                 logistic_output_dir = label_output_dir / "logistic"
                 logistic_output_dir.mkdir(exist_ok=True, parents=True)
@@ -179,7 +188,6 @@ def main():
                 logistic_y_pred = logistic_model.predict_log_proba(test_data['features'])[:, 1]
                 final_logistic_auroc = sklearn.metrics.roc_auc_score(test_data['boolean_values'], logistic_y_pred)
 
-
                 print('logistic', final_logistic_auroc, label_name)
                 logistic_results = {
                     "label_name": label_name,
@@ -187,11 +195,16 @@ def main():
                 }
 
                 save_to_json(logistic_results, logistic_metrics_output_file)
-                logistic_predictions = {
-                    "subject_ids": test_data["subject_ids"].tolist(),
-                    "predictions": logistic_y_pred.tolist()
-                }
-                save_to_json(logistic_predictions, logistic_output_dir / f'logistic_predictions_{label_name}.json')
+
+                logistic_predictions = pd.DataFrame({
+                    "subject_id": test_data["subject_ids"].tolist(),
+                    "prediction_time": test_data["prediction_time"].tolist(),
+                    "boolean_prediction_probability": logistic_y_pred.tolist(),
+                    "boolean_value": test_data["boolean_values"].tolist()
+                })
+                logistic_test_predictions = logistic_output_dir / "test_predictions"
+                logistic_test_predictions.mkdir(exist_ok=True, parents=True)
+                logistic_predictions.to_parquet(logistic_test_predictions / "predictions.parquet")
 
 
 if __name__ == "__main__":
