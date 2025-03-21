@@ -75,10 +75,8 @@ def create_arg_parser():
 def main():
     from pathlib import Path
     args = create_arg_parser().parse_args()
-    models_path = Path(args.pretraining_data) / "models_baseline"
-    # if models_path.exists():
-    # shutil.rmtree(str(models_path))
-    models_path.mkdir(exist_ok=False)
+    models_path = Path(args.pretraining_data) / "models"
+    models_path.mkdir(exist_ok=True)
 
     labels = LABEL_NAMES
     if args.cohort_label is not None:

@@ -3,7 +3,6 @@ FEMR also supports generating tabular feature representations, an important base
 """
 import os
 import glob
-import shutil
 import pathlib
 import datetime
 import meds_reader
@@ -11,7 +10,7 @@ import pandas as pd
 import femr.featurizers
 import pickle
 from pathlib import Path
-from generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
+from .generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
 
 
 
@@ -35,7 +34,7 @@ def main():
 
     args = create_arg_parser().parse_args()
     features_path = Path(args.pretraining_data) / "features"
-    features_path.mkdir(exist_ok=False)
+    features_path.mkdir(exist_ok=True, parents=True)
     pretraining_data = pathlib.Path(args.pretraining_data)
     labels = LABEL_NAMES
     if args.cohort_dir is not None:
