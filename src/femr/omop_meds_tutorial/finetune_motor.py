@@ -29,31 +29,28 @@ def create_arg_parser():
 def main():
     args = create_arg_parser().parse_args()
     pretraining_data = pathlib.Path(args.pretraining_data)
-    models_path = pretraining_data / "models"
-    if models_path.exists():
-        shutil.rmtree(models_path)
-    models_path.mkdir(exist_ok=True)
+
 
     labels = LABEL_NAMES
     if args.cohort_label is not None:
-        label_path = models_path.parent / "labels" / (args.cohort_label + '.parquet')
+        label_path = pretraining_data / "labels" / (args.cohort_label + '.parquet')
         if label_path.exists():
             print(f"Using the user defined label at: {label_path}")
             labels = [args.cohort_label]
         else:
             raise RuntimeError(f"The user provided label does not exist at {label_path}")
 
-    output_dir = models_path.parent / "results"
+    output_dir = pretraining_data / "results"
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in labels:
-            label_output_dir = output_dir / label_name
+            label_output_dir = output_dir / label_name / "motor"
             label_output_dir.mkdir(exist_ok=True)
-            test_result_file = label_output_dir / (label_name + '_motor_test_results.json')
+            test_result_file = label_output_dir / 'metrics.json'
             if test_result_file.exists():
                 print(f"The result already existed for {label_name} at {test_result_file}, it will be skipped!")
                 continue
-            labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
-            with open(models_path.parent / 'features' / (label_name + '_motor.pkl'), 'rb') as f:
+            labels = pd.read_parquet(pretraining_data / "labels" / (label_name + '.parquet'))
+            with open(pretraining_data / 'features' / (label_name + '_motor.pkl'), 'rb') as f:
                 features = pickle.load(f)
 
             # Remove the labels that do not have features generated
@@ -86,6 +83,16 @@ def main():
 
             y_pred = model.predict_log_proba(test_data['features'])[:, 1]
 
+            logistic_predictions = pd.DataFrame({
+                "subject_id": test_data["subject_ids"].tolist(),
+                "prediction_time": test_data["prediction_time"].tolist(),
+                "boolean_prediction_probability": y_pred.tolist(),
+                "boolean_value": test_data["boolean_values"].tolist()
+            })
+            logistic_test_predictions = label_output_dir / "test_predictions"
+            logistic_test_predictions.mkdir(exist_ok=True, parents=True)
+            logistic_predictions.to_parquet(logistic_test_predictions / "predictions.parquet")
+
             roc_auc = sklearn.metrics.roc_auc_score(test_data['boolean_values'], y_pred)
             precision, recall, _ = sklearn.metrics.precision_recall_curve(test_data['boolean_values'], y_pred)
             pr_auc = sklearn.metrics.auc(recall, precision)
@@ -97,6 +104,8 @@ def main():
             print(label_name, roc_auc)
             with open(test_result_file, "w") as f:
                 json.dump(metrics, f, indent=4)
+
+
 
 
 if __name__ == "__main__":
