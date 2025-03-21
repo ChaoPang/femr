@@ -9,7 +9,6 @@ import meds_reader
 import pandas as pd
 import femr.featurizers
 import pickle
-from pathlib import Path
 from .generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
 
 
@@ -33,9 +32,11 @@ def read_recursive_parquet(root_dir):
 def main():
 
     args = create_arg_parser().parse_args()
-    features_path = Path(args.pretraining_data) / "features"
-    features_path.mkdir(exist_ok=True, parents=True)
     pretraining_data = pathlib.Path(args.pretraining_data)
+    features_path = pretraining_data / "features"
+    features_path.mkdir(exist_ok=True, parents=True)
+    label_path = pretraining_data / "labels"
+    label_path.mkdir(exist_ok=True, parents=True)
     labels = LABEL_NAMES
     if args.cohort_dir is not None:
         if os.path.isdir(args.cohort_dir):
@@ -54,14 +55,14 @@ def main():
         if len(cohort) > 0 and isinstance(cohort.prediction_time.iloc[0], datetime.date):
             cohort["prediction_time"] = pd.to_datetime(cohort["prediction_time"])
         cohort.to_parquet(
-            pretraining_data / "labels" / (label_name + '.parquet')
+            label_path / (label_name + '.parquet')
         )
         labels = [label_name]
 
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=32) as database:
         for label_name in labels:
             labels = pd.read_parquet(
-                features_path.parent / "labels"  / (label_name + '.parquet')
+                label_path / (label_name + '.parquet')
             )
             featurizer = femr.featurizers.FeaturizerList([
                 femr.featurizers.AgeFeaturizer(is_normalize=True),
