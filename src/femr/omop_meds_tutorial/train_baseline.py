@@ -166,7 +166,7 @@ def main():
                 save_to_json(lightgbm_results, gbm_metrics_output_file)
                 lightgbm_predictions = pd.DataFrame({
                     "subject_id": test_data["subject_ids"].tolist(),
-                    "prediction_time": test_data["prediction_time"].tolist(),
+                    "prediction_time": test_data["prediction_times"].tolist(),
                     "boolean_prediction_probability": lightgbm_preds.tolist(),
                     "boolean_value": test_data["boolean_values"].tolist()
                 })
@@ -174,18 +174,18 @@ def main():
                 gbm_test_predictions.mkdir(exist_ok=True, parents=True)
                 lightgbm_predictions.to_parquet(gbm_test_predictions / "test_gbm_predictions.parquet")
 
+            logistic_output_dir = label_output_dir / "logistic"
             logistic_metrics_output_file = logistic_output_dir / f'metrics.json'
             if logistic_metrics_output_file.exists():
                 print(
                     f"The result already exists for Logistic {label_name} at {logistic_metrics_output_file}, it will be skipped!")
             else:
-                logistic_output_dir = label_output_dir / "logistic"
+                final_train_data = apply_mask(labeled_features, train_mask | dev_mask)
                 logistic_output_dir.mkdir(exist_ok=True, parents=True)
                 logistic_model = LogisticRegressionCV(scoring='roc_auc')
                 logistic_model.fit(final_train_data['features'], final_train_data['boolean_values'])
                 logistic_y_pred = logistic_model.predict_log_proba(test_data['features'])[:, 1]
                 final_logistic_auroc = sklearn.metrics.roc_auc_score(test_data['boolean_values'], logistic_y_pred)
-
                 print('logistic', final_logistic_auroc, label_name)
                 logistic_results = {
                     "label_name": label_name,
@@ -196,7 +196,7 @@ def main():
 
                 logistic_predictions = pd.DataFrame({
                     "subject_id": test_data["subject_ids"].tolist(),
-                    "prediction_time": test_data["prediction_time"].tolist(),
+                    "prediction_time": test_data["prediction_times"].tolist(),
                     "boolean_prediction_probability": logistic_y_pred.tolist(),
                     "boolean_value": test_data["boolean_values"].tolist()
                 })

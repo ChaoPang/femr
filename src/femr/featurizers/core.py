@@ -312,6 +312,7 @@ class FeaturizerList:
 def join_labels(features: Mapping[str, np.ndarray], labels: pd.DataFrame) -> Mapping[str, np.ndarray]:
     indices = []
     label_values = []
+    prediction_times = []
 
     order = np.lexsort((features["feature_times"], features["subject_ids"]))
 
@@ -337,10 +338,12 @@ def join_labels(features: Mapping[str, np.ndarray], labels: pd.DataFrame) -> Map
         )
         indices.append(order[feature_index])
         label_values.append(label.boolean_value)
+        prediction_times.append(label.prediction_time)
 
     return {
         "boolean_values": np.array(label_values),
         "subject_ids": features["subject_ids"][indices],
         "times": features["feature_times"][indices],
         "features": features["features"][indices, :],
+        "prediction_times" : np.asarray(prediction_times)
     }

@@ -85,7 +85,7 @@ def main():
 
             logistic_predictions = pd.DataFrame({
                 "subject_id": test_data["subject_ids"].tolist(),
-                "prediction_time": test_data["prediction_time"].tolist(),
+                "prediction_time": test_data["prediction_times"].tolist(),
                 "boolean_prediction_probability": y_pred.tolist(),
                 "boolean_value": test_data["boolean_values"].tolist()
             })
