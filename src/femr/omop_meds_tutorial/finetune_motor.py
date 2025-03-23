@@ -44,7 +44,7 @@ def main():
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in labels:
             label_output_dir = output_dir / label_name / "motor"
-            label_output_dir.mkdir(exist_ok=True)
+            label_output_dir.mkdir(exist_ok=True, parents=True)
             test_result_file = label_output_dir / 'metrics.json'
             if test_result_file.exists():
                 print(f"The result already existed for {label_name} at {test_result_file}, it will be skipped!")
