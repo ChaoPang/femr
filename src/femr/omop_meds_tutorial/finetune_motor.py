@@ -86,8 +86,9 @@ def main():
             logistic_predictions = pd.DataFrame({
                 "subject_id": test_data["subject_ids"].tolist(),
                 "prediction_time": test_data["prediction_times"].tolist(),
-                "boolean_prediction_probability": y_pred.tolist(),
-                "boolean_value": test_data["boolean_values"].tolist()
+                "predicted_boolean_probability": y_pred.tolist(),
+                "predicted_boolean_value": None,
+                "boolean_value": test_data["boolean_values"].astype(bool).tolist()
             })
             logistic_test_predictions = label_output_dir / "test_predictions"
             logistic_test_predictions.mkdir(exist_ok=True, parents=True)

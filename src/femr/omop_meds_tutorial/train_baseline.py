@@ -167,8 +167,9 @@ def main():
                 lightgbm_predictions = pd.DataFrame({
                     "subject_id": test_data["subject_ids"].tolist(),
                     "prediction_time": test_data["prediction_times"].tolist(),
-                    "boolean_prediction_probability": lightgbm_preds.tolist(),
-                    "boolean_value": test_data["boolean_values"].tolist()
+                    "predicted_boolean_probability": lightgbm_preds.tolist(),
+                    "predicted_boolean_value": None,
+                    "boolean_value": test_data["boolean_values"].astype(bool).tolist()
                 })
                 gbm_test_predictions = gbm_output_dir / "test_predictions"
                 gbm_test_predictions.mkdir(exist_ok=True, parents=True)
@@ -197,8 +198,8 @@ def main():
                 logistic_predictions = pd.DataFrame({
                     "subject_id": test_data["subject_ids"].tolist(),
                     "prediction_time": test_data["prediction_times"].tolist(),
-                    "boolean_prediction_probability": logistic_y_pred.tolist(),
-                    "boolean_value": test_data["boolean_values"].tolist()
+                    "predicted_boolean_probability": logistic_y_pred.tolist(),
+                    "predicted_boolean_value": test_data["boolean_values"].astype(bool).tolist()
                 })
                 logistic_test_predictions = logistic_output_dir / "test_predictions"
                 logistic_test_predictions.mkdir(exist_ok=True, parents=True)
