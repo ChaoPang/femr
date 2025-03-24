@@ -81,7 +81,7 @@ def main():
             model = LogisticRegressionCV(scoring='roc_auc')
             model.fit(train_data['features'], train_data['boolean_values'])
 
-            y_pred = model.predict_log_proba(test_data['features'])[:, 1]
+            y_pred = model.predict_proba(test_data['features'])[:, 1]
 
             logistic_predictions = pd.DataFrame({
                 "subject_id": test_data["subject_ids"].tolist(),

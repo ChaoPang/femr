@@ -146,7 +146,7 @@ def main():
                 gbm_final = lgb.train(best_params, dtrain_final, num_boost_round=best_num_trees)
 
                 # Generate predictions on test data.
-                lightgbm_preds = gbm_final.predict(test_data['features'], raw_score=True)
+                lightgbm_preds = gbm_final.predict(test_data['features'], raw_score=False)
                 final_lightgbm_auroc2 = -sklearn.metrics.roc_auc_score(test_data['boolean_values'], lightgbm_preds)
 
                 final_lightgbm_auroc = lightgbm_objective(lightgbm_study.best_trial, train_data=final_train_data,
@@ -185,7 +185,7 @@ def main():
                 logistic_output_dir.mkdir(exist_ok=True, parents=True)
                 logistic_model = LogisticRegressionCV(scoring='roc_auc')
                 logistic_model.fit(final_train_data['features'], final_train_data['boolean_values'])
-                logistic_y_pred = logistic_model.predict_log_proba(test_data['features'])[:, 1]
+                logistic_y_pred = logistic_model.predict_proba(test_data['features'])[:, 1]
                 final_logistic_auroc = sklearn.metrics.roc_auc_score(test_data['boolean_values'], logistic_y_pred)
                 print('logistic', final_logistic_auroc, label_name)
                 logistic_results = {
