@@ -93,6 +93,9 @@ def main():
         for label_name in labels:
             label_output_dir = output_dir / label_name
             label_output_dir.mkdir(exist_ok=True)
+            done_file = label_output_dir / "done"
+            if done_file.exists():
+                print(f"The results for {label_name} already exist because the indicator file is present at {done_file}")
 
             labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
             with open(models_path.parent / 'features' / (label_name + '.pkl'), 'rb') as f:
@@ -205,6 +208,12 @@ def main():
                 logistic_test_predictions.mkdir(exist_ok=True, parents=True)
                 logistic_predictions.to_parquet(logistic_test_predictions / "predictions.parquet")
 
+            try:
+                f = open(done_file, "x")
+            except FileExistsError:
+                print("File already exists.")
+            finally:
+                f.close()
 
 if __name__ == "__main__":
     main()
