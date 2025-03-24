@@ -61,6 +61,11 @@ def main():
 
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=32) as database:
         for label_name in labels:
+            feature_output_path = features_path / (label_name + '.pkl')
+            if feature_output_path.exists():
+                print(
+                    f"The features for {label_name} already exist at {feature_output_path}, it will be skipped!")
+                continue
             labels = pd.read_parquet(
                 label_path / (label_name + '.parquet')
             )
@@ -82,7 +87,7 @@ def main():
 
             print("Done featurizing")
 
-            with open(features_path / (label_name + '.pkl'), 'wb') as f:
+            with open(feature_output_path, 'wb') as f:
                 pickle.dump(features, f)
 
 if __name__ == "__main__":
