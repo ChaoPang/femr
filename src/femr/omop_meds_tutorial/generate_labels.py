@@ -15,13 +15,8 @@ from pathlib import Path
 
 
 LABEL_NAMES = [
-    "afib_ischemic_stroke_meds",
     "death",
-    # "discharge_home_death_meds",
-    "hf_readmission_meds",
-    "hospitalization_meds",
     "long_los",
-    "t2dm_hf_meds"
 ]
 # LABEL_NAMES = ['long_los', '30d']
 ADMISSION_EVENTS = ["Visit/IP", "Visit/ERIP", "CMS Place of Service/51", "CMS Place of Service/61"]
