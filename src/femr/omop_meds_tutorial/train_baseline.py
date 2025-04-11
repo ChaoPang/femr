@@ -5,6 +5,7 @@ FEMR also supports generating tabular feature representations, an important base
 import femr.splits
 import meds_reader
 import pandas as pd
+import polars as pl
 import femr.featurizers
 import numpy as np
 import sklearn
@@ -167,16 +168,19 @@ def main():
                 }
 
                 save_to_json(lightgbm_results, gbm_metrics_output_file)
-                lightgbm_predictions = pd.DataFrame({
+                lightgbm_predictions = pl.DataFrame({
                     "subject_id": test_data["subject_ids"].tolist(),
                     "prediction_time": test_data["prediction_times"].tolist(),
                     "predicted_boolean_probability": lightgbm_preds.tolist(),
                     "predicted_boolean_value": None,
                     "boolean_value": test_data["boolean_values"].astype(bool).tolist()
                 })
+                lightgbm_predictions = lightgbm_predictions.with_columns(
+                    pl.col("predicted_boolean_value").cast(pl.Boolean())
+                )
                 gbm_test_predictions = gbm_output_dir / "test_predictions"
                 gbm_test_predictions.mkdir(exist_ok=True, parents=True)
-                lightgbm_predictions.to_parquet(gbm_test_predictions / "test_gbm_predictions.parquet")
+                lightgbm_predictions.write_parquet(gbm_test_predictions / "test_gbm_predictions.parquet")
 
             logistic_output_dir = label_output_dir / "logistic"
             logistic_metrics_output_file = logistic_output_dir / f'metrics.json'
@@ -198,16 +202,19 @@ def main():
 
                 save_to_json(logistic_results, logistic_metrics_output_file)
 
-                logistic_predictions = pd.DataFrame({
+                logistic_predictions = pl.DataFrame({
                     "subject_id": test_data["subject_ids"].tolist(),
                     "prediction_time": test_data["prediction_times"].tolist(),
                     "predicted_boolean_probability": logistic_y_pred.tolist(),
                     "predicted_boolean_value": None,
                     "boolean_value": test_data["boolean_values"].astype(bool).tolist()
                 })
+                logistic_predictions = logistic_predictions.with_columns(
+                    pl.col("predicted_boolean_value").cast(pl.Boolean())
+                )
                 logistic_test_predictions = logistic_output_dir / "test_predictions"
                 logistic_test_predictions.mkdir(exist_ok=True, parents=True)
-                logistic_predictions.to_parquet(logistic_test_predictions / "predictions.parquet")
+                logistic_predictions.write_parquet(logistic_test_predictions / "predictions.parquet")
 
             try:
                 f = open(done_file, "x")

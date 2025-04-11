@@ -1,11 +1,10 @@
 """
 FEMR also supports generating tabular feature representations, an important baseline for EHR modeling
 """
-import os
 import json
-import shutil
 import meds_reader
 import pandas as pd
+import polars as pl
 import femr.featurizers
 import pickle
 import pathlib
@@ -83,16 +82,24 @@ def main():
 
             y_pred = model.predict_proba(test_data['features'])[:, 1]
 
-            logistic_predictions = pd.DataFrame({
+            # Convert predictions to a Polars DataFrame
+            logistic_predictions = pl.DataFrame({
                 "subject_id": test_data["subject_ids"].tolist(),
                 "prediction_time": test_data["prediction_times"].tolist(),
                 "predicted_boolean_probability": y_pred.tolist(),
                 "predicted_boolean_value": None,
                 "boolean_value": test_data["boolean_values"].astype(bool).tolist()
             })
+
+            logistic_predictions = logistic_predictions.with_columns(
+                pl.col("predicted_boolean_value").cast(pl.Boolean())
+            )
+
+            # Create output directory
             logistic_test_predictions = label_output_dir / "test_predictions"
             logistic_test_predictions.mkdir(exist_ok=True, parents=True)
-            logistic_predictions.to_parquet(logistic_test_predictions / "predictions.parquet")
+            # Write to parquet
+            logistic_predictions.write_parquet(logistic_test_predictions / "predictions.parquet")
 
             roc_auc = sklearn.metrics.roc_auc_score(test_data['boolean_values'], y_pred)
             precision, recall, _ = sklearn.metrics.precision_recall_curve(test_data['boolean_values'], y_pred)
