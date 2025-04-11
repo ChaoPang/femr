@@ -73,6 +73,12 @@ def main():
             labels = [label_name]
 
         for label_name in labels:
+            feature_output_path = pretraining_data / "features" / (label_name + '_motor.pkl')
+            if feature_output_path.exists():
+                print(
+                    f"The features for {label_name} already exist at {feature_output_path}, it will be skipped!"
+                )
+                continue
             labels = pd.read_parquet(
                 pretraining_data / "labels" / (label_name + '.parquet')
             )
@@ -93,7 +99,7 @@ def main():
                 tokens_per_batch=args.tokens_per_batch,
                 num_proc=args.num_proc,
             )
-            with open(pretraining_data / "features" / (label_name + '_motor.pkl'), 'wb') as f:
+            with open(feature_output_path, 'wb') as f:
                 pickle.dump(features, f)
 
 
