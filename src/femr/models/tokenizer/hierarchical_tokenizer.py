@@ -81,7 +81,7 @@ def map_statistics(
     code_counts: Dict[str, float] = collections.defaultdict(float)
 
     
-    bad_properties = {'code', 'time'}
+    bad_properties = {'code', 'time', 'visit_id'}
 
     property_samples = {
         k: {
@@ -304,7 +304,7 @@ class HierarchicalTokenizer(transformers.utils.PushToHubMixin):
         for i, dict_entry in enumerate(vocab):
             if dict_entry["type"] == "code":
                 self.code_lookup[dict_entry["code_string"]] = i
-            elif dict_entry["type"] == "numeric":
+            elif dict_entry["type"] == "numeric" and dict_entry["property"] != 'visit_id':
                 numeric_entries[dict_entry["property"]].append((dict_entry["val_start"], i))
             elif dict_entry["type"] == "text":
                 self.string_lookup[dict_entry["property"]][dict_entry["text_string"]] = i
