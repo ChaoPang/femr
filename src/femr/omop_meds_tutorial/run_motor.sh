@@ -165,13 +165,22 @@ for TASK_DIR in "$COHORT_BASE_DIR"*/; do
 
     # Run the first command: generate MOTOR features
     echo "Running MOTOR feature generation for $TASK_NAME..."
-    python -u -m femr.omop_meds_tutorial.generate_motor_features \
-      --pretraining_data "$PRETRAINING_DATA" \
-      --meds_reader "$OMOP_MEDS_READER" \
-      --num_proc "$NUM_PROC" \
-      --tokens_per_batch "$TOKENS_PER_BATCH" \
-      --cohort_dir "$TASK_DIR" \
-      $([ -n "$OBSERVATION_WINDOW" ] && echo "--observation_window $OBSERVATION_WINDOW")
+
+    # Build the command with conditional observation_window parameter
+    GENERATE_CMD="python -u -m femr.omop_meds_tutorial.generate_motor_features \
+      --pretraining_data \"$PRETRAINING_DATA\" \
+      --meds_reader \"$OMOP_MEDS_READER\" \
+      --num_proc \"$NUM_PROC\" \
+      --tokens_per_batch \"$TOKENS_PER_BATCH\" \
+      --cohort_dir \"$TASK_DIR\""
+
+    # Add observation_window parameter if specified
+    if [ -n "$OBSERVATION_WINDOW" ]; then
+        GENERATE_CMD="$GENERATE_CMD --observation_window \"$OBSERVATION_WINDOW\""
+    fi
+
+    # Execute the command
+    eval $GENERATE_CMD
 
     # Check if the first command succeeded
     if [ $? -ne 0 ]; then
@@ -189,6 +198,7 @@ for TASK_DIR in "$COHORT_BASE_DIR"*/; do
     # Check if the second command succeeded
     if [ $? -ne 0 ]; then
         echo "Error: MOTOR fine-tuning failed for task $TASK_NAME"
+        continue
     fi
 
     # Determine the MOTOR prediction folder path based on observation window
