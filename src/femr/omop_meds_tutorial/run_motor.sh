@@ -191,6 +191,25 @@ for TASK_DIR in "$COHORT_BASE_DIR"*/; do
         echo "Error: MOTOR fine-tuning failed for task $TASK_NAME"
     fi
 
+    # Determine the MOTOR prediction folder path based on observation window
+    if [ -n "$OBSERVATION_WINDOW" ]; then
+        MOTOR_PREDICTION_FOLDER="$PRETRAINING_DATA/results/$TASK_NAME/motor_$OBSERVATION_WINDOW/test_predictions"
+        MOTOR_OUTPUT_DIR="$PRETRAINING_DATA/results/$TASK_NAME/motor_$OBSERVATION_WINDOW/"
+    else
+        MOTOR_PREDICTION_FOLDER="$PRETRAINING_DATA/results/$TASK_NAME/motor/test_predictions"
+        MOTOR_OUTPUT_DIR="$PRETRAINING_DATA/results/$TASK_NAME/motor/"
+    fi
+
+    # Run the third command to compute the metrics
+    echo "Running meds-evaluation for $TASK_NAME..."
+    meds-evaluation-cli predictions_path="$MOTOR_PREDICTION_FOLDER" \
+      output_dir="$MOTOR_OUTPUT_DIR"
+
+    # Check if the third command succeeded
+    if [ $? -ne 0 ]; then
+        echo "Error: Running meds-evaluation failed for task $TASK_NAME"
+    fi
+
     echo "Completed processing of task: $TASK_NAME"
     echo "----------------------------------------"
 done

@@ -13,6 +13,7 @@ import sklearn
 from sklearn.linear_model import LogisticRegressionCV
 import femr.splits
 from .generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
+from .generate_motor_features import get_motor_features_name
 
 
 def create_arg_parser():
@@ -21,6 +22,13 @@ def create_arg_parser():
         "--cohort_label",
         dest="cohort_label",
         default=None,
+    )
+    args.add_argument(
+        "--observation_window",
+        dest="observation_window",
+        type=int,
+        default=None,
+        help="The observation window for extracting features",
     )
     return args
 
@@ -42,14 +50,19 @@ def main():
     output_dir = pretraining_data / "results"
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in labels:
-            label_output_dir = output_dir / label_name / "motor"
+            if args.observation_window:
+                label_output_dir = output_dir / label_name / f"motor_{args.observation_window}"
+            else:
+                label_output_dir = output_dir / label_name / f"motor"
             label_output_dir.mkdir(exist_ok=True, parents=True)
             test_result_file = label_output_dir / 'metrics.json'
             if test_result_file.exists():
                 print(f"The result already existed for {label_name} at {test_result_file}, it will be skipped!")
                 continue
             labels = pd.read_parquet(pretraining_data / "labels" / (label_name + '.parquet'))
-            with open(pretraining_data / 'features' / (label_name + '_motor.pkl'), 'rb') as f:
+
+            motor_features_name = get_motor_features_name(label_name, args.observation_window)
+            with open(pretraining_data / 'features' / motor_features_name, 'rb') as f:
                 features = pickle.load(f)
 
             # Remove the labels that do not have features generated

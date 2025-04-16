@@ -1,6 +1,8 @@
 import os
 import glob
 import datetime
+from typing import Optional
+
 import femr.transforms
 import meds_reader
 import femr.models.transformer
@@ -42,10 +44,17 @@ def create_arg_parser():
     )
     return args
 
+
 def read_recursive_parquet(root_dir):
     all_files = glob.glob(os.path.join(root_dir, '**', '*.parquet'), recursive=True)
     df = pd.concat((pd.read_parquet(f) for f in all_files), ignore_index=True)
     return df
+
+
+def get_motor_features_name(label_name: str, observation_window: Optional[int] = None) -> str:
+    if observation_window:
+        label_name + '_motor_' + str(observation_window) + '.pkl'
+    return label_name + '_motor.pkl'
 
 
 def main():
@@ -80,7 +89,8 @@ def main():
             labels = [label_name]
 
         for label_name in labels:
-            feature_output_path = pretraining_data / "features" / (label_name + '_motor.pkl')
+            motor_features_name = get_motor_features_name(label_name, args.observation_window)
+            feature_output_path = pretraining_data / "features" / motor_features_name
             if feature_output_path.exists():
                 print(
                     f"The features for {label_name} already exist at {feature_output_path}, it will be skipped!"
