@@ -33,6 +33,13 @@ def create_arg_parser():
         dest="cohort_dir",
         default=None,
     )
+    args.add_argument(
+        "--observation_window",
+        dest="observation_window",
+        type=int,
+        default=None,
+        help="The observation window for extracting features",
+    )
     return args
 
 def read_recursive_parquet(root_dir):
@@ -98,6 +105,7 @@ def main():
                 device=torch.device('cuda'),
                 tokens_per_batch=args.tokens_per_batch,
                 num_proc=args.num_proc,
+                observation_window=args.observation_window,
             )
             with open(feature_output_path, 'wb') as f:
                 pickle.dump(features, f)

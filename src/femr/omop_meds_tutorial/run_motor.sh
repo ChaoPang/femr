@@ -4,6 +4,8 @@
 SCRIPT_NAME=$(basename "$0")
 NUM_PROC=10
 TOKENS_PER_BATCH=231072
+# Use empty value to indicate no observation window specified
+OBSERVATION_WINDOW=""
 
 # Function to display help
 show_help() {
@@ -20,6 +22,7 @@ show_help() {
     echo "  --meds_reader            Override OMOP_MEDS_READER environment variable"
     echo "  --num_proc               Number of processors to use (default: 10)"
     echo "  --tokens_per_batch       Tokens per batch (default: 231072)"
+    echo "  --observation_window     Observation window in days (optional integer value)"
     echo
     echo "Environment Variables:"
     echo "  PRETRAINING_DATA         Path to pretraining data (required if not set with --pretraining_data)"
@@ -28,6 +31,7 @@ show_help() {
     echo "Example:"
     echo "  $SCRIPT_NAME /path/to/cohorts"
     echo "  $SCRIPT_NAME /path/to/cohorts --pretraining_data /path/to/pretraining --meds_reader /path/to/reader --num_proc 8"
+    echo "  $SCRIPT_NAME /path/to/cohorts --observation_window 30"
 }
 
 # Parse command line options
@@ -55,6 +59,10 @@ while [ $# -gt 0 ]; do
             ;;
         --tokens_per_batch)
             TOKENS_PER_BATCH="$2"
+            shift 2
+            ;;
+        --observation_window)
+            OBSERVATION_WINDOW="$2"
             shift 2
             ;;
         -*)
@@ -112,6 +120,7 @@ echo "  PRETRAINING_DATA: $PRETRAINING_DATA"
 echo "  OMOP_MEDS_READER: $OMOP_MEDS_READER"
 echo "  NUM_PROC: $NUM_PROC"
 echo "  TOKENS_PER_BATCH: $TOKENS_PER_BATCH"
+echo "  OBSERVATION_WINDOW: $([ -z "$OBSERVATION_WINDOW" ] && echo "Not specified" || echo "$OBSERVATION_WINDOW")"
 echo
 
 # Iterate over all task directories in the cohort folder
@@ -161,7 +170,8 @@ for TASK_DIR in "$COHORT_BASE_DIR"*/; do
       --meds_reader "$OMOP_MEDS_READER" \
       --num_proc "$NUM_PROC" \
       --tokens_per_batch "$TOKENS_PER_BATCH" \
-      --cohort_dir "$TASK_DIR"
+      --cohort_dir "$TASK_DIR" \
+      $([ -n "$OBSERVATION_WINDOW" ] && echo "--observation_window $OBSERVATION_WINDOW")
 
     # Check if the first command succeeded
     if [ $? -ne 0 ]; then

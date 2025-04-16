@@ -440,6 +440,7 @@ def compute_features(
     tokens_per_batch: int = 1024,
     device: Optional[torch.device] = None,
     ontology: Optional[femr.ontology.Ontology] = None,
+    observation_window: Optional[int] = None,
 ) -> Dict[str, np.ndarray]:
     """ "Compute features for a set of labels given a dataset and a model.
 
@@ -451,13 +452,14 @@ def compute_features(
         tokens_per_batch: The maximum number of tokens per batch
         device: Which type of compute to use
         ontology: A FEMR ontology object, which is necessary for models that use a hierarchical tokenizer
+        observation_window: The observation window in which the features are extracted
 
     Returns:
         A dictionary of numpy arrays, with three keys, "subject_ids", "feature_times" and "features"
          -  "subject_ids" and "feature_times" define the subject and time each feature refers to
          -  "features" provides the representations at each subject id and feature time
     """
-    task = femr.models.tasks.LabeledSubjectTask(labels)
+    task = femr.models.tasks.LabeledSubjectTask(labels, observation_window)
 
     model = femr.models.transformer.FEMRModel.from_pretrained(model_path, task_config=task.get_task_config())
     tokenizer = femr.models.tokenizer.HierarchicalTokenizer.from_pretrained(model_path, ontology=ontology)

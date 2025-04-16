@@ -61,15 +61,18 @@ class Task(abc.ABC):
 
 class LabeledSubjectTask(Task):
 
-    def __init__(self, labels: Sequence[meds.Label]):
+    def __init__(self, labels: Sequence[meds.Label], observation_window: Optional[int] = None):
         super().__init__()
-
         self.label_map: Mapping[int, Any] = collections.defaultdict(list)
         for label in labels:
             self.label_map[label["subject_id"]].append(label)
 
         for k, v in self.label_map.items():
             v.sort(key=lambda a: a["prediction_time"])
+
+        if observation_window is not None:
+            assert observation_window > 0, "the feature extract observation window must be greater than 0 or None"
+        self.observation_window = observation_window
 
     def get_task_config(self) -> femr.models.config.FEMRTaskConfig:
         return femr.models.config.FEMRTaskConfig(task_type="labeled_subjects")
@@ -104,8 +107,18 @@ class LabeledSubjectTask(Task):
 
             current_label = self.current_labels[self.current_label_index]
 
-            is_valid = current_date <= current_label["prediction_time"]
-            next_valid = next_date is not None and next_date <= current_label["prediction_time"]
+            if self.observation_window is not None:
+                observation_start_time = (
+                        current_label["prediction_time"] - datetime.timedelta(days=self.observation_window)
+                )
+                is_valid = observation_start_time <= current_date <= current_label["prediction_time"]
+                next_valid = (
+                        next_date is not None and
+                        observation_start_time <=next_date <= current_label["prediction_time"]
+                )
+            else:
+                is_valid = current_date <= current_label["prediction_time"]
+                next_valid = next_date is not None and next_date <= current_label["prediction_time"]
 
             if next_valid:
                 # Next one is valid, so break early to give it a chance next time
