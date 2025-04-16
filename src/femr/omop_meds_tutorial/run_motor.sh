@@ -120,7 +120,7 @@ echo "  PRETRAINING_DATA: $PRETRAINING_DATA"
 echo "  OMOP_MEDS_READER: $OMOP_MEDS_READER"
 echo "  NUM_PROC: $NUM_PROC"
 echo "  TOKENS_PER_BATCH: $TOKENS_PER_BATCH"
-echo "  OBSERVATION_WINDOW: $([ -z "$OBSERVATION_WINDOW" ] && echo "Not specified" || echo "$OBSERVATION_WINDOW")"
+    echo "  OBSERVATION_WINDOW: $([ -z "$OBSERVATION_WINDOW" ] && echo "Not specified" || echo "$OBSERVATION_WINDOW")"
 echo
 
 # Iterate over all task directories in the cohort folder
@@ -179,6 +179,9 @@ for TASK_DIR in "$COHORT_BASE_DIR"*/; do
         GENERATE_CMD="$GENERATE_CMD --observation_window \"$OBSERVATION_WINDOW\""
     fi
 
+    # Print the command
+    echo "Executing command: $GENERATE_CMD"
+
     # Execute the command
     eval $GENERATE_CMD
 
@@ -190,10 +193,23 @@ for TASK_DIR in "$COHORT_BASE_DIR"*/; do
 
     # Run the second command: fine-tune MOTOR
     echo "Running MOTOR fine-tuning for $TASK_NAME..."
-    python -u -m femr.omop_meds_tutorial.finetune_motor \
-      --pretraining_data "$PRETRAINING_DATA" \
-      --meds_reader "$OMOP_MEDS_READER" \
-      --cohort_label "$TASK_NAME"
+
+    # Build the command with conditional observation_window parameter
+    FINETUNE_CMD="python -u -m femr.omop_meds_tutorial.finetune_motor \
+      --pretraining_data \"$PRETRAINING_DATA\" \
+      --meds_reader \"$OMOP_MEDS_READER\" \
+      --cohort_label \"$TASK_NAME\""
+
+    # Add observation_window parameter if specified
+    if [ -n "$OBSERVATION_WINDOW" ]; then
+        FINETUNE_CMD="$FINETUNE_CMD --observation_window \"$OBSERVATION_WINDOW\""
+    fi
+
+    # Print the command
+    echo "Executing command: $FINETUNE_CMD"
+
+    # Execute the command
+    eval $FINETUNE_CMD
 
     # Check if the second command succeeded
     if [ $? -ne 0 ]; then
@@ -210,10 +226,16 @@ for TASK_DIR in "$COHORT_BASE_DIR"*/; do
         MOTOR_OUTPUT_DIR="$PRETRAINING_DATA/results/$TASK_NAME/motor/"
     fi
 
+    # Build the evaluation command
+    EVAL_CMD="meds-evaluation-cli predictions_path=\"$MOTOR_PREDICTION_FOLDER\" \
+      output_dir=\"$MOTOR_OUTPUT_DIR\""
+
     # Run the third command to compute the metrics
     echo "Running meds-evaluation for $TASK_NAME..."
-    meds-evaluation-cli predictions_path="$MOTOR_PREDICTION_FOLDER" \
-      output_dir="$MOTOR_OUTPUT_DIR"
+    echo "Executing command: $EVAL_CMD"
+
+    # Execute the command
+    eval $EVAL_CMD
 
     # Check if the third command succeeded
     if [ $? -ne 0 ]; then
