@@ -41,6 +41,11 @@ def get_baseline_features_name(label_name: str, observation_window: Optional[int
         return label_name + '_' + str(observation_window) + '.pkl'
     return label_name + '.pkl'
 
+def get_baseline_featurizer_name(label_name: str, observation_window: Optional[int] = None) -> str:
+    if observation_window:
+        return label_name + '_' + str(observation_window) + '_featurizer.pkl'
+    return label_name + '_featurizer.pkl'
+
 
 def main():
     args = create_arg_parser().parse_args()
@@ -92,7 +97,7 @@ def main():
 
             print("Done preprossing, about to featurize")
 
-            with open(features_path / (label_name + '_featurizer.pkl'), 'wb') as f:
+            with open(features_path / get_baseline_featurizer_name(label_name, args.observation_window), 'wb') as f:
                 pickle.dump(featurizer, f)
 
             features = featurizer.featurize(database, labels)

@@ -105,7 +105,7 @@ def main():
             else:
                 label_output_dir = output_dir / label_name / f"baseline"
 
-            label_output_dir.mkdir(exist_ok=True)
+            label_output_dir.mkdir(exist_ok=True, parents=True)
             done_file = label_output_dir / "done"
             if done_file.exists():
                 print(f"The results for {label_name} already exist because the indicator file is present at {done_file}")
