@@ -171,6 +171,7 @@ class CountFeaturizer(Featurizer):
         numeric_value_decile: bool = False,
         string_value_combination: bool = False,
         characters_for_string_values: int = 100,
+        observation_window: Optional[int] = None,
     ):
         """
         Args:
@@ -224,6 +225,9 @@ class CountFeaturizer(Featurizer):
             ), f"You cannot have duplicate values in the `time_bins` argument. You passed in: {self.time_bins}"
 
         self.finalized = False
+        if observation_window is not None:
+            assert observation_window > 0, "observation_window must be either greater than or equal to 0 or None"
+        self.observation_window = observation_window
 
     def get_codes(self, code: str) -> Iterator[str]:
         if self.is_ontology_expansion:
@@ -349,6 +353,16 @@ class CountFeaturizer(Featurizer):
 
             label_idx = 0
             for event in subject.events:
+
+                if self.observation_window is not None and event.time is not None:
+                    # We skip the events that fall outside the observation window start
+                    # if observation_window is provided
+                    observation_window_start = (
+                            labels[label_idx].prediction_time - datetime.timedelta(days=self.observation_window)
+                    )
+                    if event.time < observation_window_start:
+                        continue
+
                 while event.time is not None and event.time > labels[label_idx].prediction_time:
                     label_idx += 1
                     # Create all features for label at index `label_idx`
@@ -385,6 +399,14 @@ class CountFeaturizer(Featurizer):
 
             label_idx = 0
             for event in subject.events:
+                if self.observation_window is not None and event.time is not None:
+                    # We skip the events that fall outside the observation window start
+                    # if observation_window is provided
+                    observation_window_start = (
+                            labels[label_idx].prediction_time - datetime.timedelta(days=self.observation_window)
+                    )
+                    if event.time < observation_window_start:
+                        continue
                 while event.time is not None and event.time > labels[label_idx].prediction_time:
                     _reshuffle_count_time_bins(
                         time_bins,

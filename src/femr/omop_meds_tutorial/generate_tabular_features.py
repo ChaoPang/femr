@@ -12,8 +12,6 @@ import pickle
 from .generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
 
 
-
-
 def create_arg_parser():
     args = create_omop_meds_tutorial_arg_parser()
     args.add_argument(
@@ -21,7 +19,15 @@ def create_arg_parser():
         dest="cohort_dir",
         default=None,
     )
+    args.add_argument(
+        "--observation_window",
+        dest="observation_window",
+        type=int,
+        default=None,
+        help="The observation window for extracting features",
+    )
     return args
+
 
 def read_recursive_parquet(root_dir):
     all_files = glob.glob(os.path.join(root_dir, '**', '*.parquet'), recursive=True)
@@ -30,7 +36,6 @@ def read_recursive_parquet(root_dir):
 
 
 def main():
-
     args = create_arg_parser().parse_args()
     pretraining_data = pathlib.Path(args.pretraining_data)
     features_path = pretraining_data / "features"
@@ -71,7 +76,7 @@ def main():
             )
             featurizer = femr.featurizers.FeaturizerList([
                 femr.featurizers.AgeFeaturizer(is_normalize=True),
-                femr.featurizers.CountFeaturizer(),
+                femr.featurizers.CountFeaturizer(observation_window=args.observation_window),
             ])
 
             print("Preprocessing")
@@ -89,6 +94,7 @@ def main():
 
             with open(feature_output_path, 'wb') as f:
                 pickle.dump(features, f)
+
 
 if __name__ == "__main__":
     main()
