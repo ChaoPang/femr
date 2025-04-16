@@ -14,6 +14,7 @@ import optuna
 import functools
 import lightgbm as lgb
 from .generate_labels import LABEL_NAMES, create_omop_meds_tutorial_arg_parser
+from .generate_tabular_features import get_baseline_features_name
 
 import pickle
 import json
@@ -70,6 +71,13 @@ def create_arg_parser():
         dest="cohort_label",
         default=None,
     )
+    args.add_argument(
+        "--observation_window",
+        dest="observation_window",
+        type=int,
+        default=None,
+        help="The observation window for extracting features",
+    )
     return args
 
 
@@ -92,14 +100,18 @@ def main():
     output_dir.mkdir(exist_ok=True, parents=True)
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in labels:
-            label_output_dir = output_dir / label_name
+            if args.observation_window:
+                label_output_dir = output_dir / label_name / f"baseline_{args.observation_window}"
+            else:
+                label_output_dir = output_dir / label_name / f"baseline"
+
             label_output_dir.mkdir(exist_ok=True)
             done_file = label_output_dir / "done"
             if done_file.exists():
                 print(f"The results for {label_name} already exist because the indicator file is present at {done_file}")
 
             labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
-            with open(models_path.parent / 'features' / (label_name + '.pkl'), 'rb') as f:
+            with open(models_path.parent / 'features' / get_baseline_features_name(label_name, args.observation_window), 'rb') as f:
                 features = pickle.load(f)
 
             # Remove the labels that do not have features generated

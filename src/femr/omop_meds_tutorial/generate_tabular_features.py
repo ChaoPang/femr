@@ -5,6 +5,8 @@ import os
 import glob
 import pathlib
 import datetime
+from typing import Optional
+
 import meds_reader
 import pandas as pd
 import femr.featurizers
@@ -33,6 +35,11 @@ def read_recursive_parquet(root_dir):
     all_files = glob.glob(os.path.join(root_dir, '**', '*.parquet'), recursive=True)
     df = pd.concat((pd.read_parquet(f) for f in all_files), ignore_index=True)
     return df
+
+def get_baseline_features_name(label_name: str, observation_window: Optional[int] = None) -> str:
+    if observation_window:
+        return label_name + '_' + str(observation_window) + '.pkl'
+    return label_name + '.pkl'
 
 
 def main():
@@ -66,7 +73,7 @@ def main():
 
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=32) as database:
         for label_name in labels:
-            feature_output_path = features_path / (label_name + '.pkl')
+            feature_output_path = features_path / get_baseline_features_name(label_name, args.observation_window)
             if feature_output_path.exists():
                 print(
                     f"The features for {label_name} already exist at {feature_output_path}, it will be skipped!")
