@@ -90,6 +90,10 @@ def main():
             train_data = apply_mask(labeled_features, train_mask)
             test_data = apply_mask(labeled_features, test_mask)
 
+            print(f"Total labels: {len(labels)}")
+            print(f"Total train features labels: {len(train_data['features'])}")
+            print(f"Total test features labels: {len(test_data['features'])}")
+
             model = LogisticRegressionCV(scoring='roc_auc')
             model.fit(train_data['features'], train_data['boolean_values'])
 
