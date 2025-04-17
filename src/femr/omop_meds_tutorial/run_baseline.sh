@@ -203,17 +203,17 @@ for TASK_DIR in "$COHORT_BASE_DIR"*/; do
 
     # Determine the output folder paths based on observation window
     if [ -n "$OBSERVATION_WINDOW" ]; then
-        GBM_PREDICTION_FOLDER="$PRETRAINING_DATA/results/$TASK_NAME/gbm_$OBSERVATION_WINDOW/test_predictions"
-        GBM_OUTPUT_DIR="$PRETRAINING_DATA/results/$TASK_NAME/gbm_$OBSERVATION_WINDOW/"
+        GBM_PREDICTION_FOLDER="$PRETRAINING_DATA/results/$TASK_NAME/baseline_$OBSERVATION_WINDOW/gbm/test_predictions"
+        GBM_OUTPUT_DIR="$PRETRAINING_DATA/results/$TASK_NAME/baseline_$OBSERVATION_WINDOW/gbm/"
 
-        LOGISTIC_PREDICTION_FOLDER="$PRETRAINING_DATA/results/$TASK_NAME/logistic_$OBSERVATION_WINDOW/test_predictions"
-        LOGISTIC_OUTPUT_DIR="$PRETRAINING_DATA/results/$TASK_NAME/logistic_$OBSERVATION_WINDOW/"
+        LOGISTIC_PREDICTION_FOLDER="$PRETRAINING_DATA/results/$TASK_NAME/baseline_$OBSERVATION_WINDOW/logistic/test_predictions"
+        LOGISTIC_OUTPUT_DIR="$PRETRAINING_DATA/results/$TASK_NAME/baseline_$OBSERVATION_WINDOW/logistic/"
     else
-        GBM_PREDICTION_FOLDER="$PRETRAINING_DATA/results/$TASK_NAME/gbm/test_predictions"
-        GBM_OUTPUT_DIR="$PRETRAINING_DATA/results/$TASK_NAME/gbm/"
+        GBM_PREDICTION_FOLDER="$PRETRAINING_DATA/results/$TASK_NAME/baseline/gbm/test_predictions"
+        GBM_OUTPUT_DIR="$PRETRAINING_DATA/results/$TASK_NAME/baseline/gbm/"
 
-        LOGISTIC_PREDICTION_FOLDER="$PRETRAINING_DATA/results/$TASK_NAME/logistic/test_predictions"
-        LOGISTIC_OUTPUT_DIR="$PRETRAINING_DATA/results/$TASK_NAME/logistic/"
+        LOGISTIC_PREDICTION_FOLDER="$PRETRAINING_DATA/results/$TASK_NAME/baseline/logistic/test_predictions"
+        LOGISTIC_OUTPUT_DIR="$PRETRAINING_DATA/results/$TASK_NAME/baseline/logistic/"
     fi
 
     # Run the third command to compute the metrics for GBM
