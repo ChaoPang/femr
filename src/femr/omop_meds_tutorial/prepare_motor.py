@@ -145,6 +145,14 @@ def create_omop_meds_tutorial_argparser():
         action="store",
         required=False,
     )
+    parser.add_argument(
+        "--num_threads",
+        dest="num_threads",
+        action="store",
+        required=False,
+        type=int,
+        default=16,
+    )
     return parser
 
 
