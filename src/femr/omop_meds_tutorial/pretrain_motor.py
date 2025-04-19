@@ -37,13 +37,13 @@ def create_arg_parser():
         "--learning_rate",
         dest="learning_rate",
         type=float,
-        default=1e-4
+        default=1e-5
     )
     arg_parser.add_argument(
         "--n_layers",
         dest="n_layers",
         type=int,
-        default=12
+        default=11
     )
     arg_parser.add_argument(
         "--n_epochs",
