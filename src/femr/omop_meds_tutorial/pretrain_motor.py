@@ -132,12 +132,11 @@ def main():
 
         logging_strategy='epoch',
         logging_steps=10,
-        disable_tqdm=True,
 
         save_strategy='epoch',
         evaluation_strategy='epoch',
 
-        prediction_loss_only=True,
+        # prediction_loss_only=True,
         dataloader_num_workers=12,
 
         save_total_limit=10,
