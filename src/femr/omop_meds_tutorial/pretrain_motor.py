@@ -134,6 +134,7 @@ def main():
         logging_steps=10,
         disable_tqdm=True,
 
+        save_strategy='epoch',
         evaluation_strategy='epoch',
 
         prediction_loss_only=True,
