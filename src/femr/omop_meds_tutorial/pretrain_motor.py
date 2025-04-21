@@ -151,7 +151,7 @@ def main():
         train_dataset=train_batches,
         eval_dataset=val_batches,
         args=trainer_config,
-        callbacks=[CustomEarlyStoppingCallback(early_stopping_patience=1, early_stopping_threshold=0.01)],
+        callbacks=[CustomEarlyStoppingCallback(early_stopping_patience=1, early_stopping_threshold=0.001)],
     )
 
     trainer.train(resume_from_checkpoint=args.checkpoint_dir)
