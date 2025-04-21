@@ -65,6 +65,11 @@ def main():
             with open(pretraining_data / 'features' / motor_features_name, 'rb') as f:
                 features = pickle.load(f)
 
+            # Find labels that have no features
+            labels_no_features = labels[~labels.subject_id.isin(features["subject_ids"])]
+            if len(labels_no_features) > 0:
+                labels_no_features.to_parquet(label_output_dir / "labels_no_features.parquet")
+
             # Remove the labels that do not have features generated
             labels = labels[labels.subject_id.isin(features["subject_ids"])]
             labels = labels.sort_values(["subject_id", "prediction_time"])

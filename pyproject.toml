@@ -27,6 +27,7 @@ dependencies = [
     "pandas-stubs >= 2.2",
     "types-tqdm >= 4.60.0",
     "xformers >= 0.0.28",
+    "meds-evaluation @ git+https://github.com/Jeanselme/meds-evaluation.git@bootstrapping"
 ]
 requires-python=">3.9"
 #dynamic = ["version"]
