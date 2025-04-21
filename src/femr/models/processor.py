@@ -164,7 +164,10 @@ class BatchCreator:
         self.tokenizer.start_subject()
 
         for event in subject.events:
-            if event.time is None or event.time.date() <= birth.date():
+            if event.time is None or (
+                    event.time.date() <= birth.date()
+                    and getattr(event, "table", "person") == "person"
+            ):
                 # Get features and weights for the current event
                 features, weights = self.tokenizer.get_feature_codes(event)
                 per_subject_hierarchical_tokens.extend(features)
@@ -176,7 +179,10 @@ class BatchCreator:
         per_subject_timestamps.append(event.time.replace(tzinfo=datetime.timezone.utc).timestamp())
                 
         for event in subject.events:
-            if event.time is None or event.time.date() <= birth.date():
+            if event.time is None or (
+                    event.time.date() <= birth.date()
+                    and getattr(event, "table", "person") == "person"
+            ):
                 continue
 
             # We want to avoid duplicate codes in the same day, so we maintain codes_seen_today
