@@ -190,7 +190,7 @@ class BatchCreator:
                 current_date = event.time.date()
                 codes_seen_today = set()
 
-            age = event.time - birth
+            age = max(datetime.timedelta(seconds=0), event.time - birth)
             if last_time is not None:
                 delta = event.time - last_time
             else:
