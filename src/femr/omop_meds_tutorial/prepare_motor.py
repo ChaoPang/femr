@@ -101,7 +101,7 @@ def main(args):
         if not train_batches_path.exists():
             print("Convert batches")
             # But generally we want to convert entire datasets
-            train_batches = processor.convert_dataset(train_database, tokens_per_batch=16 * 1024, num_proc=32)
+            train_batches = processor.convert_dataset(train_database, tokens_per_batch=args.tokens_per_batch, num_proc=32)
 
             print("Convert batches to pytorch")
             # Convert our batches to pytorch tensors
@@ -112,7 +112,7 @@ def main(args):
 
         if not val_batches_path.exists():
             print("Convert val batches")
-            val_batches = processor.convert_dataset(val_database, tokens_per_batch=16 * 1024, num_proc=32)
+            val_batches = processor.convert_dataset(val_database, tokens_per_batch=args.tokens_per_batch, num_proc=32)
             # Convert our batches to pytorch tensors
             val_batches.set_format("pt")
             val_batches.save_to_disk(val_batches_path)
@@ -152,6 +152,15 @@ def create_omop_meds_tutorial_argparser():
         required=False,
         type=int,
         default=16,
+    )
+    parser.add_argument(
+        "--tokens_per_batch",
+        dest="tokens_per_batch",
+        action="store",
+        required=False,
+        type=int,
+        # this is decided based on the 99% percentile of the number of tokens
+        default=8192,
     )
     return parser
 
