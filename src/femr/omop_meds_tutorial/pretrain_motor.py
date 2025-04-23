@@ -111,13 +111,13 @@ def main():
     model = model.to(torch.device("cuda"))
 
     learning_rate = args.learning_rate
-
+    output_dir = 'tmp_trainer_' + sys.argv[1]
     trainer_config = transformers.TrainingArguments(
         per_device_train_batch_size=args.per_device_train_batch_size,
         per_device_eval_batch_size=args.per_device_eval_batch_size,
 
         learning_rate=learning_rate,
-        output_dir='tmp_trainer_' + sys.argv[1],
+        output_dir=output_dir,
         remove_unused_columns=False,
         bf16=True,
 
@@ -153,8 +153,10 @@ def main():
         args=trainer_config,
         callbacks=[CustomEarlyStoppingCallback(early_stopping_patience=1, early_stopping_threshold=0.001)],
     )
-
-    trainer.train(resume_from_checkpoint=args.checkpoint_dir)
+    train_result = trainer.train(resume_from_checkpoint=args.checkpoint_dir)
+    trainer.log_metrics("train", train_result.metrics)
+    trainer.save_metrics("train", train_result.metrics)
+    trainer.save_state()
 
 
 if __name__ == "__main__":
