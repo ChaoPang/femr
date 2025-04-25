@@ -56,6 +56,8 @@ def main():
                 label_output_dir = output_dir / label_name / f"motor"
             label_output_dir.mkdir(exist_ok=True, parents=True)
             test_result_file = label_output_dir / 'metrics.json'
+            features_label_data = label_output_dir / 'features_with_label'
+            features_label_data.mkdir(exist_ok=True, parents=True)
             if test_result_file.exists():
                 print(f"The result already existed for {label_name} at {test_result_file}, it will be skipped!")
                 continue
@@ -94,6 +96,22 @@ def main():
 
             train_data = apply_mask(labeled_features, train_mask)
             test_data = apply_mask(labeled_features, test_mask)
+
+            print("Saving features and labels to parquet")
+            train_features_list = [feature for feature in train_data["features"]]
+            pd.DataFrame({
+                "subject_id" : train_data["subject_ids"],
+                "prediction_time" : train_data["prediction_times"],
+                "boolean_value": train_data["boolean_values"],
+                "features" : train_features_list
+            }).to_parquet(features_label_data / "train.parquet")
+            test_features_list = [feature for feature in test_data["features"]]
+            pd.DataFrame({
+                "subject_id" : test_data["subject_ids"],
+                "prediction_time" : test_data["prediction_times"],
+                "boolean_value": test_data["boolean_values"],
+                "features" : test_features_list
+            }).to_parquet(features_label_data / "test.parquet")
 
             print(f"Total labels: {len(labels)}")
             print(f"Total train features labels: {len(train_data['features'])}")
