@@ -109,6 +109,7 @@ def main():
             done_file = label_output_dir / "done"
             if done_file.exists():
                 print(f"The results for {label_name} already exist because the indicator file is present at {done_file}")
+                continue
 
             labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
             with open(models_path.parent / 'features' / get_baseline_features_name(label_name, args.observation_window), 'rb') as f:
