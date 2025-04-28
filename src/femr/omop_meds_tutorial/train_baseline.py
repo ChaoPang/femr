@@ -149,50 +149,53 @@ def main():
                 print(
                     f"The result already exists for GBM {label_name} at {gbm_metrics_output_file}, it will be skipped!")
             else:
-                lightgbm_study = optuna.create_study()  # Create a new study.
-                lightgbm_study.optimize(functools.partial(lightgbm_objective, train_data=train_data, dev_data=dev_data),
-                                        n_trials=10)  # Invoke optimization of the objective function.
+                try:
+                    lightgbm_study = optuna.create_study()  # Create a new study.
+                    lightgbm_study.optimize(functools.partial(lightgbm_objective, train_data=train_data, dev_data=dev_data),
+                                            n_trials=10)  # Invoke optimization of the objective function.
 
-                final_train_data = apply_mask(labeled_features, train_mask | dev_mask)
-                print("Computing predictions")
-                best_num_trees = lightgbm_study.best_trial.user_attrs['num_trees']
-                best_params = lightgbm_study.best_trial.params
-                best_params.update({"objective": "binary", "metric": "auc", "verbosity": -1})
-                dtrain_final = lgb.Dataset(final_train_data['features'], label=final_train_data['boolean_values'])
-                gbm_final = lgb.train(best_params, dtrain_final, num_boost_round=best_num_trees)
+                    final_train_data = apply_mask(labeled_features, train_mask | dev_mask)
+                    print("Computing predictions")
+                    best_num_trees = lightgbm_study.best_trial.user_attrs['num_trees']
+                    best_params = lightgbm_study.best_trial.params
+                    best_params.update({"objective": "binary", "metric": "auc", "verbosity": -1})
+                    dtrain_final = lgb.Dataset(final_train_data['features'], label=final_train_data['boolean_values'])
+                    gbm_final = lgb.train(best_params, dtrain_final, num_boost_round=best_num_trees)
 
-                # Generate predictions on test data.
-                lightgbm_preds = gbm_final.predict(test_data['features'], raw_score=False)
-                final_lightgbm_auroc2 = -sklearn.metrics.roc_auc_score(test_data['boolean_values'], lightgbm_preds)
+                    # Generate predictions on test data.
+                    lightgbm_preds = gbm_final.predict(test_data['features'], raw_score=False)
+                    final_lightgbm_auroc2 = -sklearn.metrics.roc_auc_score(test_data['boolean_values'], lightgbm_preds)
 
-                final_lightgbm_auroc = lightgbm_objective(lightgbm_study.best_trial, train_data=final_train_data,
-                                                          dev_data=test_data,
-                                                          num_trees=lightgbm_study.best_trial.user_attrs['num_trees'])
-                print(label_name)
+                    final_lightgbm_auroc = lightgbm_objective(lightgbm_study.best_trial, train_data=final_train_data,
+                                                              dev_data=test_data,
+                                                              num_trees=lightgbm_study.best_trial.user_attrs['num_trees'])
+                    print(label_name)
 
-                print("Saving predictions")
+                    print("Saving predictions")
 
-                print('lightgbm', final_lightgbm_auroc, label_name)
-                lightgbm_results = {
-                    "label_name": label_name,
-                    "final_lightgbm_auroc": final_lightgbm_auroc,
-                    "final_lightgbm_auroc2": final_lightgbm_auroc2,
-                }
+                    print('lightgbm', final_lightgbm_auroc, label_name)
+                    lightgbm_results = {
+                        "label_name": label_name,
+                        "final_lightgbm_auroc": final_lightgbm_auroc,
+                        "final_lightgbm_auroc2": final_lightgbm_auroc2,
+                    }
 
-                save_to_json(lightgbm_results, gbm_metrics_output_file)
-                lightgbm_predictions = pl.DataFrame({
-                    "subject_id": test_data["subject_ids"].tolist(),
-                    "prediction_time": test_data["prediction_times"].tolist(),
-                    "predicted_boolean_probability": lightgbm_preds.tolist(),
-                    "predicted_boolean_value": None,
-                    "boolean_value": test_data["boolean_values"].astype(bool).tolist()
-                })
-                lightgbm_predictions = lightgbm_predictions.with_columns(
-                    pl.col("predicted_boolean_value").cast(pl.Boolean())
-                )
-                gbm_test_predictions = gbm_output_dir / "test_predictions"
-                gbm_test_predictions.mkdir(exist_ok=True, parents=True)
-                lightgbm_predictions.write_parquet(gbm_test_predictions / "test_gbm_predictions.parquet")
+                    save_to_json(lightgbm_results, gbm_metrics_output_file)
+                    lightgbm_predictions = pl.DataFrame({
+                        "subject_id": test_data["subject_ids"].tolist(),
+                        "prediction_time": test_data["prediction_times"].tolist(),
+                        "predicted_boolean_probability": lightgbm_preds.tolist(),
+                        "predicted_boolean_value": None,
+                        "boolean_value": test_data["boolean_values"].astype(bool).tolist()
+                    })
+                    lightgbm_predictions = lightgbm_predictions.with_columns(
+                        pl.col("predicted_boolean_value").cast(pl.Boolean())
+                    )
+                    gbm_test_predictions = gbm_output_dir / "test_predictions"
+                    gbm_test_predictions.mkdir(exist_ok=True, parents=True)
+                    lightgbm_predictions.write_parquet(gbm_test_predictions / "test_gbm_predictions.parquet")
+                except Exception as e:
+                    print(e)
 
             logistic_output_dir = label_output_dir / "logistic"
             logistic_metrics_output_file = logistic_output_dir / f'metrics.json'
