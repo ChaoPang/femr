@@ -74,8 +74,8 @@ def main():
 
             # Remove the labels that do not have features generated
             labels = labels[labels.subject_id.isin(features["subject_ids"])]
-            labels = labels.sort_values(["subject_id", "prediction_time"])
-
+            # labels = labels.sort_values(["subject_id", "prediction_time"])
+            labels = labels.sample(n=len(labels), random_state=42, replace=False)
             labeled_features = femr.featurizers.join_labels(features, labels)
 
             main_split = femr.splits.SubjectSplit.load_from_csv(str(pretraining_data / 'main_split.csv'))
