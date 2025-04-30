@@ -112,6 +112,7 @@ def main():
                 continue
 
             labels = pd.read_parquet(models_path.parent / "labels" / (label_name + '.parquet'))
+            labels = labels.sort_values(["subject_id", "prediction_time"])
             labels = labels.sample(n=len(labels), random_state=42, replace=False)
             with open(models_path.parent / 'features' / get_baseline_features_name(label_name, args.observation_window), 'rb') as f:
                 features = pickle.load(f)
