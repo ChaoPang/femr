@@ -99,12 +99,16 @@ def main():
 
             print("Saving features and labels to parquet")
             train_features_list = [feature for feature in train_data["features"]]
-            pd.DataFrame({
+            train_set = pd.DataFrame({
                 "subject_id" : train_data["subject_ids"],
                 "prediction_time" : train_data["prediction_times"],
                 "boolean_value": train_data["boolean_values"],
                 "features" : train_features_list
-            }).to_parquet(features_label_data / "train.parquet")
+            }).sample(
+                frac=1.0,
+                random_state=42
+            )
+            train_set.to_parquet(features_label_data / "train.parquet")
             test_features_list = [feature for feature in test_data["features"]]
             pd.DataFrame({
                 "subject_id" : test_data["subject_ids"],
@@ -118,7 +122,7 @@ def main():
             print(f"Total test features labels: {len(test_data['features'])}")
 
             model = LogisticRegressionCV(scoring='roc_auc')
-            model.fit(train_data['features'], train_data['boolean_values'])
+            model.fit(train_set['features'].to_list(), train_set['boolean_value'])
 
             y_pred = model.predict_proba(test_data['features'])[:, 1]
 
