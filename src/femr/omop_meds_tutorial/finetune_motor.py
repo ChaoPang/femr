@@ -108,14 +108,14 @@ def main():
                 frac=1.0,
                 random_state=42
             )
-            train_set.to_parquet(features_label_data / "train.parquet")
+            train_set.to_parquet(features_label_data / "train.parquet", index=False)
             test_features_list = [feature for feature in test_data["features"]]
             pd.DataFrame({
                 "subject_id" : test_data["subject_ids"],
                 "prediction_time" : test_data["prediction_times"],
                 "boolean_value": test_data["boolean_values"],
                 "features" : test_features_list
-            }).to_parquet(features_label_data / "test.parquet")
+            }).to_parquet(features_label_data / "test.parquet", index=False)
 
             print(f"Total labels: {len(labels)}")
             print(f"Total train features labels: {len(train_data['features'])}")
