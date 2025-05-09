@@ -14,7 +14,7 @@ Step 1. Converting into meds_reader
 The FEMR library uses the [meds_reader](https://github.com/EthanSteinberg/meds_reader) utility for processing MEDS data. This requires a second preprocessing step
 
 ```bash
-pip install meds_reader==0.0.6
+pip install meds_reader==0.1.3
 ```
 
 ```bash
