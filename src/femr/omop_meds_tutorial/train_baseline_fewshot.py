@@ -237,7 +237,7 @@ def main():
                 )
             else:
                 print(f"Starting training logistic for {size}")
-                logistic_model = LogisticRegressionCV(scoring='roc_auc', random_state=42)
+                logistic_model = LogisticRegressionCV(scoring='roc_auc', random_state=42, max_iter=500)
                 logistic_model.fit(
                     vstack(subset['features'].to_list()),
                     subset['boolean_values'].to_numpy()
