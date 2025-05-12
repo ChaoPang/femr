@@ -1,5 +1,6 @@
 import os
 import glob
+import json
 import datetime
 from typing import Optional
 
@@ -83,6 +84,7 @@ def main():
             # We need to cast prediction_time to datetime
             if len(cohort) > 0 and isinstance(cohort.prediction_time.iloc[0], datetime.date):
                 cohort["prediction_time"] = pd.to_datetime(cohort["prediction_time"])
+
             cohort.to_parquet(
                 pretraining_data / "labels" / (label_name + '.parquet')
             )
@@ -91,6 +93,7 @@ def main():
         for label_name in labels:
             motor_features_name = get_motor_features_name(label_name, args.observation_window)
             feature_output_path = pretraining_data / "features" / motor_features_name
+            training_metrics_file = pretraining_data / "flops" / motor_features_name
             if feature_output_path.exists():
                 print(
                     f"The features for {label_name} already exist at {feature_output_path}, it will be skipped!"
@@ -107,6 +110,8 @@ def main():
                 )
                 for label in labels.to_dict(orient="records")
             ]
+            total_flops = femr.models.transformer.TotalFlops()
+            start_time: datetime = datetime.now()
             features = femr.models.transformer.compute_features(
                 db=database,
                 model_path=str(pretraining_data / "motor_model"),
@@ -116,10 +121,18 @@ def main():
                 tokens_per_batch=args.tokens_per_batch,
                 num_proc=args.num_proc,
                 observation_window=args.observation_window,
+                total_flops=total_flops
             )
             with open(feature_output_path, 'wb') as f:
                 pickle.dump(features, f)
 
+            # Save the training metrics to the output file
+            with open(training_metrics_file, "w") as output_file:
+                training_metrics = {
+                    "duration_in_seconds": (datetime.now() - start_time).total_seconds(),
+                    "total_flops": total_flops.total_flops,
+                }
+                json.dump(training_metrics, output_file)
 
 if __name__ == "__main__":
     main()

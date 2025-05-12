@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import collections
 import math
+from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+from dataclasses import dataclass
 
 import meds
 import meds_reader
@@ -13,6 +15,7 @@ import transformers
 import xformers.ops
 from torch import nn
 from tqdm import tqdm
+from torch.profiler import ProfilerActivity, profile
 
 import femr.models.config
 import femr.models.processor
@@ -20,6 +23,11 @@ import femr.models.rmsnorm
 import femr.models.tasks
 import femr.models.tokenizer
 import femr.models.xformers
+
+
+@dataclass(frozen=False)
+class TotalFlops:
+    total_flops: int = 0
 
 
 # From https://github.com/kingoflolz/mesh-transformer-jax
@@ -92,17 +100,17 @@ class FEMREncoderLayer(nn.Module):
             self.config.hidden_size + self.config.intermediate_size, self.config.hidden_size, bias=self.config.use_bias
         )
 
-    def forward(self, x, time_data, pos_embed, attn_bias, s):        
+    def forward(self, x, time_data, pos_embed, attn_bias, s):
         x = self.norm(x)
 
         if self.config.use_normed_ages:
-            all_time = torch.concatenate((time_data, time_data**2), axis=-1)
+            all_time = torch.concatenate((time_data, time_data ** 2), axis=-1)
             x[:, -all_time.shape[1]:] = all_time.to(dtype=x.dtype)
 
         transformed = self.input_proj(x)
 
         ff = transformed[:, : -self.config.hidden_size * 3]
-        qkv = transformed[:, -self.config.hidden_size * 3 :]
+        qkv = transformed[:, -self.config.hidden_size * 3:]
 
         head_size = self.config.hidden_size // self.config.n_heads
 
@@ -120,7 +128,6 @@ class FEMREncoderLayer(nn.Module):
         )
 
         attn = attn.reshape(x.shape)
-
 
         if self.config.hidden_act == "gelu":
             ff = F.gelu(ff)
@@ -203,11 +210,11 @@ class CLMBRTaskHead(nn.Module):
 
 class MOTORTaskHead(nn.Module):
     def __init__(
-        self,
-        hidden_size: int,
-        pretraining_task_info: List[Tuple[str, float]],
-        time_bins: List[float],
-        final_layer_size: int,
+            self,
+            hidden_size: int,
+            pretraining_task_info: List[Tuple[str, float]],
+            time_bins: List[float],
+            final_layer_size: int,
     ):
         super().__init__()
 
@@ -234,10 +241,10 @@ class MOTORTaskHead(nn.Module):
         # time_dependent_logits = self.task_layer(time_independent_features)
 
         assert (
-            batch["log_time"].shape == time_dependent_logits.shape
+                batch["log_time"].shape == time_dependent_logits.shape
         ), f"{time_dependent_logits.shape} {batch['log_time'].shape}"
         assert (
-            batch["is_event"].shape == time_dependent_logits.shape
+                batch["is_event"].shape == time_dependent_logits.shape
         ), f"{time_dependent_logits.shape} {batch['is_event'].shape}"
 
         # Force to always be negative
@@ -252,7 +259,7 @@ class MOTORTaskHead(nn.Module):
 
         #     bias = self.task_layer.bias.reshape(1, 1, -1)
         #     better = torch.exp2((time_dependent_logits - bias).type(torch.bfloat16) + (bias + batch["log_time"]).type(torch.bfloat16)).type(torch.float32)
-            
+
         #     bad_error = torch.mean((actual - bad) **2)
         #     better_error = torch.mean((actual - better) **2)
         #     var = torch.var(actual)
@@ -271,7 +278,6 @@ class MOTORTaskHead(nn.Module):
         # print(self.task_layer.bias.reshape(1, 1, -1) + batch["log_time"])
         # print(self.task_layer.bias)
         # print(time_dependent_logits - self.task_layer.bias.reshape(1, 1, -1))
-        
 
         # total_loss = time_dependent_logits + batch["log_time"]
         # max_loss = torch.max(total_loss)
@@ -282,23 +288,18 @@ class MOTORTaskHead(nn.Module):
 
         # # max_location[0][0] = 532
 
-
         # stats(features[max_location[0], :])
         # stats(time_independent_features[max_location[0], max_location[1], :])
 
-
         # stats(features[532, :])
         # stats(time_independent_features[532, max_location[1], :])
-
 
         # print("Log time", batch["log_time"][max_location])
         # print("Logits", time_dependent_logits[max_location])
         # print("Bias", self.task_layer.bias[max_location[2]][0])
 
-
         # # # print(batch["log_time"][max_location])
 
-        
         # # print(features[max_location[0], :])
         # # print(time_independent_features[max_location[0], max_location[1], :])
         # # print(self.task_layer.weight[max_location[2], :])
@@ -311,7 +312,6 @@ class MOTORTaskHead(nn.Module):
 
         # print("Recompute", (task_vector * feature_vector).sum() + self.task_layer.bias[max_location[2]][0])
 
-
         # features[max_location[0], :] = 0
         # time_independent_features[max_location[0], max_location[1], :] = 0
 
@@ -321,7 +321,6 @@ class MOTORTaskHead(nn.Module):
         # time_dependent_logits[max_location[0], max_location[1], :] = 0
 
         # stats(time_dependent_logits)
-
 
         # print(time_dependent_logits - self.task_layer.bias.unsqueeze(0).unsqueeze(0))
 
@@ -433,14 +432,15 @@ def to_device(data: Any, device: torch.device) -> Any:
 
 
 def compute_features(
-    db: meds_reader.SubjectDatabase,
-    model_path: str,
-    labels: List[meds.Label],
-    num_proc: int = 1,
-    tokens_per_batch: int = 1024,
-    device: Optional[torch.device] = None,
-    ontology: Optional[femr.ontology.Ontology] = None,
-    observation_window: Optional[int] = None,
+        db: meds_reader.SubjectDatabase,
+        model_path: str,
+        labels: List[meds.Label],
+        num_proc: int = 1,
+        tokens_per_batch: int = 1024,
+        device: Optional[torch.device] = None,
+        ontology: Optional[femr.ontology.Ontology] = None,
+        observation_window: Optional[int] = None,
+        total_flops: TotalFlops = None
 ) -> Dict[str, np.ndarray]:
     """ "Compute features for a set of labels given a dataset and a model.
 
@@ -453,6 +453,7 @@ def compute_features(
         device: Which type of compute to use
         ontology: A FEMR ontology object, which is necessary for models that use a hierarchical tokenizer
         observation_window: The observation window in which the features are extracted
+        total_flops: TotalFlops to record the total number of flops
 
     Returns:
         A dictionary of numpy arrays, with three keys, "subject_ids", "feature_times" and "features"
@@ -489,7 +490,21 @@ def compute_features(
             for batch in tqdm(loader):
                 if device:
                     batch = to_device(batch, device)
-                _, result = model(**batch, return_reprs=True)
+
+                if total_flops:
+                    with profile(
+                            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                            with_flops=True,
+                    ) as prof:
+                        _, result = model(**batch, return_reprs=True)
+
+                    for event in prof.key_averages():
+                        if hasattr(event, "flops") and event.flops > 0:
+                            # Convert to GFLOPs
+                            total_flops.total_flops += event.flops / 1e9
+                else:
+                    _, result = model(**batch, return_reprs=True)
+
                 all_subject_ids.append(result["subject_ids"].to(cpu_device, non_blocking=True))
                 all_feature_times.append(result["timestamps"].to(cpu_device, non_blocking=True))
                 all_representations.append(result["representations"].to(cpu_device, non_blocking=True))
