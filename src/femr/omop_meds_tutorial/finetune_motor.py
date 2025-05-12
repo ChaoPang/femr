@@ -64,7 +64,7 @@ def main():
             labels = pd.read_parquet(pretraining_data / "labels" / (label_name + '.parquet'))
 
             motor_features_name = get_motor_features_name(label_name, args.observation_window)
-            with open(pretraining_data / 'features' / motor_features_name, 'rb') as f:
+            with open(pretraining_data / 'features' / f"{motor_features_name}.pkl", 'rb') as f:
                 features = pickle.load(f)
 
             # Find labels that have no features

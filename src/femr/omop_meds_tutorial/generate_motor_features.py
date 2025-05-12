@@ -54,8 +54,8 @@ def read_recursive_parquet(root_dir):
 
 def get_motor_features_name(label_name: str, observation_window: Optional[int] = None) -> str:
     if observation_window:
-        return label_name + '_motor_' + str(observation_window) + '.pkl'
-    return label_name + '_motor.pkl'
+        return label_name + '_motor_' + str(observation_window)
+    return label_name + '_motor'
 
 
 def main():
@@ -63,6 +63,11 @@ def main():
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         pretraining_data = pathlib.Path(args.pretraining_data)
         ontology_path = pretraining_data / 'ontology.pkl'
+
+        features_path = pretraining_data / "features"
+        features_path.mkdir(exist_ok=True, parents=True)
+        flops_path = pretraining_data / "flops"
+        flops_path.mkdir(exist_ok=True, parents=True)
 
         with open(ontology_path, 'rb') as f:
             ontology = pickle.load(f)
@@ -92,8 +97,8 @@ def main():
 
         for label_name in labels:
             motor_features_name = get_motor_features_name(label_name, args.observation_window)
-            feature_output_path = pretraining_data / "features" / motor_features_name
-            training_metrics_file = pretraining_data / "flops" / motor_features_name
+            feature_output_path = features_path / f"{motor_features_name}.pkl"
+            training_metrics_file = flops_path / f"{motor_features_name}.json"
             if feature_output_path.exists():
                 print(
                     f"The features for {label_name} already exist at {feature_output_path}, it will be skipped!"
