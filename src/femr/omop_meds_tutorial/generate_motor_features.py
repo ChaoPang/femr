@@ -111,7 +111,7 @@ def main():
                 for label in labels.to_dict(orient="records")
             ]
             total_flops = femr.models.transformer.TotalFlops()
-            start_time: datetime = datetime.now()
+            start_time: datetime.datetime = datetime.datetime.now()
             features = femr.models.transformer.compute_features(
                 db=database,
                 model_path=str(pretraining_data / "motor_model"),
@@ -129,7 +129,7 @@ def main():
             # Save the training metrics to the output file
             with open(training_metrics_file, "w") as output_file:
                 training_metrics = {
-                    "duration_in_seconds": (datetime.now() - start_time).total_seconds(),
+                    "duration_in_seconds": (datetime.datetime.now() - start_time).total_seconds(),
                     "total_flops": total_flops.total_flops,
                 }
                 json.dump(training_metrics, output_file)
