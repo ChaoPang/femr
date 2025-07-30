@@ -16,12 +16,13 @@ def main(args):
     subject_splits_path = meds_reader_path / "metadata/subject_splits.parquet"
     code_metadata_path = meds_reader_path / "metadata/codes.parquet"
     codes_to_skip = []
+    num_threads = args.num_threads
     if args.motor_codes_to_skip:
         codes_to_skip = pl.read_parquet(args.motor_codes_to_skip)
         codes_to_skip = codes_to_skip["code"].to_list()
 
 
-    with meds_reader.SubjectDatabase(str(meds_reader_path), num_threads=32) as database:
+    with meds_reader.SubjectDatabase(str(meds_reader_path), num_threads=num_threads) as database:
         subject_ids = [_ for _ in database]
         ontology_path = pretraining_data_path / 'ontology.pkl'
         if not ontology_path.exists():
@@ -59,7 +60,8 @@ def main(args):
             tokenizer = HierarchicalTokenizer.train(
                 main_database,
                 vocab_size=1024 * 16,
-                ontology=ontology
+                ontology=ontology,
+                num_proc=num_threads
             )
             # Save the tokenizer to the same directory as the model
             tokenizer.save_pretrained(tokenizer_path)
@@ -77,7 +79,8 @@ def main(args):
                 num_tasks=8 * 1024,
                 num_bins=8,
                 final_layer_size=512,
-                codes_to_skip=codes_to_skip
+                codes_to_skip=codes_to_skip,
+                num_proc=num_threads
             )
 
             with open(task_path, 'wb') as f:
@@ -101,7 +104,7 @@ def main(args):
         if not train_batches_path.exists():
             print("Convert batches")
             # But generally we want to convert entire datasets
-            train_batches = processor.convert_dataset(train_database, tokens_per_batch=args.tokens_per_batch, num_proc=32)
+            train_batches = processor.convert_dataset(train_database, tokens_per_batch=args.tokens_per_batch, num_proc=num_threads)
 
             print("Convert batches to pytorch")
             # Convert our batches to pytorch tensors
@@ -112,7 +115,7 @@ def main(args):
 
         if not val_batches_path.exists():
             print("Convert val batches")
-            val_batches = processor.convert_dataset(val_database, tokens_per_batch=args.tokens_per_batch, num_proc=32)
+            val_batches = processor.convert_dataset(val_database, tokens_per_batch=args.tokens_per_batch, num_proc=num_threads)
             # Convert our batches to pytorch tensors
             val_batches.set_format("pt")
             val_batches.save_to_disk(val_batches_path)
