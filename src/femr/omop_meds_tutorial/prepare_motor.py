@@ -160,7 +160,7 @@ def create_omop_meds_tutorial_argparser():
         required=False,
         type=int,
         # this is decided based on the 99% percentile of the number of tokens
-        default=8192,
+        default=16384,
     )
     return parser
 
