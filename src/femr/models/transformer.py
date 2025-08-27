@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import collections
 import math
-from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 from dataclasses import dataclass
+
+from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
 
 import meds
 import meds_reader
@@ -146,6 +147,12 @@ class FEMRTransformer(nn.Module):
         super().__init__()
         self.config = config
 
+        # Initialize model parallel attributes
+        self.model_parallel = False
+        self.device_map = None
+        self.first_device = "cpu"
+        self.last_device = "cpu"
+
         self.in_norm = femr.models.rmsnorm.RMSNorm(self.config.hidden_size)
         self.out_norm = femr.models.rmsnorm.RMSNorm(self.config.hidden_size)
 
@@ -162,6 +169,10 @@ class FEMRTransformer(nn.Module):
         self.layers = nn.ModuleList([FEMREncoderLayer(config) for i in range(self.config.n_layers)])
 
     def forward(self, batch, s):
+        # Initialize model_parallel attribute if not exists
+        if not hasattr(self, 'model_parallel'):
+            self.model_parallel = False
+
         if not self.config.is_hierarchical:
             x = self.embed(batch["tokens"])
         else:
@@ -169,18 +180,104 @@ class FEMRTransformer(nn.Module):
 
         x = self.in_norm(x)
         time_data = batch["time_data"]
-        pos_embed = fixed_pos_embedding(batch["ages"], self.config.hidden_size // self.config.n_heads, x.dtype)
+
+        # Get device from current tensor for positional embedding
+        current_device = x.device
+        pos_embed = fixed_pos_embedding(
+            batch["ages"].to(current_device),
+            self.config.hidden_size // self.config.n_heads,
+            x.dtype
+        )
 
         attn_bias = xformers.ops.fmha.attn_bias.BlockDiagonalMask.from_seqlens(
             batch["subject_lengths"].tolist()
         ).make_local_attention(self.config.attention_width)
 
-        for layer in self.layers:
-            x = x + layer(x, time_data, pos_embed, attn_bias, s)
+        if self.model_parallel:
+            # Move other inputs to appropriate devices as needed
+            time_data = time_data.to(current_device)
+            s = s.to(current_device)
+
+            # Process through layers with device movement
+            for i, layer in enumerate(self.layers):
+                # Determine target device for this layer
+                target_device = None
+                for device_id, layer_indices in self.device_map.items():
+                    if i in layer_indices:
+                        target_device = f"cuda:{device_id}" if device_id != "cpu" else "cpu"
+                        break
+
+                if target_device and target_device != str(x.device):
+                    # Move tensors to target device
+                    x = x.to(target_device)
+                    time_data = time_data.to(target_device)
+                    pos_embed = (pos_embed[0].to(target_device), pos_embed[1].to(target_device))
+                    s = s.to(target_device)
+                    # Note: attn_bias might need special handling depending on its type
+
+                x = x + layer(x, time_data, pos_embed, attn_bias, s)
+
+            # Move to final device for output norm
+            if hasattr(self, 'last_device') and str(x.device) != self.last_device:
+                x = x.to(self.last_device)
+        else:
+            # Standard non-parallel execution
+            for layer in self.layers:
+                x = x + layer(x, time_data, pos_embed, attn_bias, s)
 
         final = self.out_norm(x)
-
         return final
+
+    def parallelize(self, device_map=None):
+        self.device_map = (
+            get_device_map(len(self.layers), range(torch.cuda.device_count()))
+            if device_map is None
+            else device_map
+        )
+        assert_device_map(self.device_map, len(self.layers))
+        self.model_parallel = True
+        self.first_device = (
+            "cpu"
+            if "cpu" in self.device_map.keys()
+            else "cuda:" + str(min(self.device_map.keys()))
+        )
+        self.last_device = "cuda:" + str(max(self.device_map.keys()))
+
+        # Move embedding layers to first device
+        if not self.config.is_hierarchical:
+            self.embed = self.embed.to(self.first_device)
+        else:
+            self.embed_bag = self.embed_bag.to(self.first_device)
+
+        # Move normalization layers to appropriate devices
+        self.in_norm = self.in_norm.to(self.first_device)
+        self.out_norm = self.out_norm.to(self.last_device)
+
+        # Move transformer layers to designated devices
+        for k, v in self.device_map.items():
+            for block in v:
+                cuda_device = "cuda:" + str(k)
+                self.layers[block] = self.layers[block].to(cuda_device)
+
+    def deparallelize(self):
+        self.model_parallel = False
+        self.device_map = None
+        self.first_device = "cpu"
+        self.last_device = "cpu"
+
+        # Move everything back to CPU
+        if not self.config.is_hierarchical:
+            self.embed = self.embed.to("cpu")
+        else:
+            self.embed_bag = self.embed_bag.to("cpu")
+
+        self.in_norm = self.in_norm.to("cpu")
+        self.out_norm = self.out_norm.to("cpu")
+
+        for index in range(len(self.layers)):
+            self.layers[index] = self.layers[index].to("cpu")
+
+        torch.cuda.empty_cache()
 
 
 class LabeledSubjectTaskHead(nn.Module):

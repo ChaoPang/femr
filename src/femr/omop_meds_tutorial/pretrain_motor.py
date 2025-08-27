@@ -11,6 +11,42 @@ import femr.models.processor
 from .generate_labels import create_omop_meds_tutorial_arg_parser
 
 
+class ModelParallelTrainer(transformers.Trainer):
+    """Custom trainer that handles model parallel setup"""
+
+    def create_optimizer(self):
+        """Override to ensure optimizer is created after model parallelization"""
+        if self.optimizer is None:
+            optimizer_cls, optimizer_kwargs = transformers.Trainer.get_optimizer_cls_and_kwargs(self.args)
+            # Get all parameters from the parallelized model
+            self.optimizer = optimizer_cls(self.model.parameters(), **optimizer_kwargs)
+        return self.optimizer
+
+    def _move_model_to_device(self, model, device):
+        """Override to prevent automatic device movement since we handle it manually"""
+        # Don't move the model automatically - we'll handle parallelization manually
+        return model
+
+    def compute_loss(self, model, inputs, return_outputs=False):
+        """Override to handle model parallel loss computation"""
+        # The model.forward will handle device placement internally
+        if self.label_smoother is not None and "labels" in inputs:
+            labels = inputs.pop("labels")
+        else:
+            labels = None
+
+        outputs = model(**inputs)
+        loss = outputs[0] if isinstance(outputs, tuple) else outputs.loss
+
+        if self.args.past_index >= 0:
+            self._past = outputs[self.args.past_index]
+
+        if labels is not None:
+            loss = self.label_smoother(outputs, labels)
+
+        return (loss, outputs) if return_outputs else loss
+
+
 class CustomEarlyStoppingCallback(transformers.EarlyStoppingCallback):
     def check_metric_value(self, args, state, control, metric_value):
         # best_metric is set by code for load_best_model
@@ -108,7 +144,14 @@ def main():
     )
 
     model = femr.models.transformer.FEMRModel(config)
-    model = model.to(torch.device("cuda"))
+    model.transformer.parallelize()
+
+    # Move task head to the last device (where transformer outputs will be)
+    if hasattr(model, 'task_model') and model.task_model is not None:
+        last_device = model.transformer.last_device
+        model.task_model = model.task_model.to(last_device)
+        print(f"Task head moved to device: {last_device}")
+
 
     learning_rate = args.learning_rate
     output_dir = 'tmp_trainer_' + sys.argv[1]
@@ -143,9 +186,13 @@ def main():
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
+
+        # Disable DDP and other data parallel features
+        local_rank=-1,
+        ddp_find_unused_parameters=False,
     )
 
-    trainer = transformers.Trainer(
+    trainer = ModelParallelTrainer(
         model=model,
         data_collator=processor.collate,
         train_dataset=train_batches,
