@@ -106,8 +106,8 @@ def main():
     )
 
     model = femr.models.transformer.FEMRModel(config)
-    model = model.to(torch.device("cuda"))
-
+    # model = model.to(torch.device("cuda"))
+    #
     # learning_rate = args.learning_rate
     # output_dir = 'tmp_trainer_' + sys.argv[1]
     # trainer_config = transformers.TrainingArguments(
