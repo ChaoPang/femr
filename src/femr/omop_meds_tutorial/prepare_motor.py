@@ -104,7 +104,12 @@ def main(args):
         if not train_batches_path.exists():
             print("Convert batches")
             # But generally we want to convert entire datasets
-            train_batches = processor.convert_dataset(train_database, tokens_per_batch=args.tokens_per_batch, num_proc=num_threads)
+            train_batches = processor.convert_dataset(
+                train_database,
+                tokens_per_batch=args.tokens_per_batch,
+                min_subjects_per_batch=1,
+                num_proc=num_threads
+            )
 
             print("Convert batches to pytorch")
             # Convert our batches to pytorch tensors
