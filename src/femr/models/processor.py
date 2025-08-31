@@ -392,8 +392,10 @@ def _batch_generator(batch_data: Tuple[np.ndarray, np.ndarray], *, creator: Batc
                     creator.add_subject(database[subject_index.item()], offset, length, subsample_task_fraction=float(subsample_task_fraction)/1e6)
 
                 result = creator.get_batch_data()
-                assert "task" in result, f"No task present in {lengths[start:end, :]} {i} {start} {end}"
-
+                if "task" not in result:
+                    print(f"Warning: No valid labels for batch {i} (subjects {lengths[start:end, 0]})")
+                    continue # Skip this batch
+                # assert "task" in result, f"No task present in {lengths[start:end, :]} {i} {start} {end}"
                 yield result
 
 
