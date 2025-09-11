@@ -61,7 +61,6 @@ def main(args):
                 main_database,
                 vocab_size=1024 * 16,
                 ontology=ontology,
-                num_proc=num_threads
             )
             # Save the tokenizer to the same directory as the model
             tokenizer.save_pretrained(tokenizer_path)
@@ -80,7 +79,6 @@ def main(args):
                 num_bins=8,
                 final_layer_size=512,
                 codes_to_skip=codes_to_skip,
-                num_proc=num_threads
             )
 
             with open(task_path, 'wb') as f:
