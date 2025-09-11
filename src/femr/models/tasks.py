@@ -169,6 +169,7 @@ class CLMBRTask(Task):
             current_date: datetime.datetime,
             next_date: Optional[datetime.datetime],
             next_features: Optional[Sequence[int]] = None,
+            actually_add: Optional[bool] = True,
     ) -> int:
         if next_features is None:
             return 0
@@ -187,6 +188,9 @@ class CLMBRTask(Task):
 
     def get_batch_data(self) -> Mapping[str, np.ndarray]:
         return {"labels": np.array(self.batch_labels, dtype=np.int32)}
+
+    def get_sampled_labels(self, length: int) -> int:
+        return length
 
 
 class SurvivalCalculator:

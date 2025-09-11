@@ -1,4 +1,3 @@
-
 import dataclasses
 from typing import Optional, Tuple
 from transformers import TrainingArguments, HfArgumentParser
@@ -6,8 +5,6 @@ from transformers import TrainingArguments, HfArgumentParser
 import numpy as np
 import transformers
 import pathlib
-import torch
-import sys
 import femr.models.transformer
 import pickle
 import datasets
