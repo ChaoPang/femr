@@ -1,1 +1,2 @@
 from .hierarchical_tokenizer import HierarchicalTokenizer
+from .flat_tokenizer import FlatTokenizer
