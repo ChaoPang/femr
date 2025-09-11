@@ -3,7 +3,7 @@ import pathlib
 import meds_reader
 import pickle
 import femr.splits
-from femr.models.tokenizer.hierarchical_tokenizer import HierarchicalTokenizer
+from femr.models.tokenizer.flat_tokenizer import train_tokenizer, FlatTokenizer
 import femr.models.tasks
 import femr.models.processor
 from femr.omop_meds_tutorial.prepare_motor import create_omop_meds_tutorial_argparser
@@ -52,15 +52,14 @@ def main(args):
         tokenizer_path = pretraining_data_path / 'tokenizer'
         if not tokenizer_path.exists():
             print("Train tokenizer")
-            tokenizer = HierarchicalTokenizer.train(
+            tokenizer = train_tokenizer(
                 main_database,
                 vocab_size=1024 * 16,
-                ontology=ontology,
             )
             # Save the tokenizer to the same directory as the model
             tokenizer.save_pretrained(tokenizer_path)
         else:
-            tokenizer = HierarchicalTokenizer.from_pretrained(tokenizer_path, ontology=ontology)
+            tokenizer = FlatTokenizer.from_pretrained(tokenizer_path)
 
         task_path = pretraining_data_path / 'clmbr_task.pkl'
         if not task_path.exists():

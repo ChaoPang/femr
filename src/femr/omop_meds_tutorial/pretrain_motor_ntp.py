@@ -3,25 +3,20 @@ import pathlib
 import femr.models.transformer
 import pickle
 import datasets
-import femr.models.tokenizer
+from femr.models.tokenizer.flat_tokenizer import FlatTokenizer
 import femr.models.processor
 from femr.omop_meds_tutorial.pretrain_motor import (
     parse_arguments,
     CustomEarlyStoppingCallback,
 )
 
-
 def main():
     motor_args, training_args = parse_arguments()
     pretraining_data = pathlib.Path(motor_args.pretraining_data)
 
-    ontology_path = pretraining_data / 'ontology.pkl'
-    with open(ontology_path, 'rb') as f:
-        ontology = pickle.load(f)
-
     tokenizer_path = pretraining_data / 'tokenizer'
-    tokenizer = femr.models.tokenizer.HierarchicalTokenizer.from_pretrained(
-        tokenizer_path, ontology=ontology
+    tokenizer = FlatTokenizer.from_pretrained(
+        tokenizer_path
     )
 
     task_path = pretraining_data / 'clmbr_task.pkl'

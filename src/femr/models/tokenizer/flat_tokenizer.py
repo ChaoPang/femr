@@ -183,7 +183,7 @@ class FlatTokenizer(transformers.utils.PushToHubMixin):
     def __init__(self, dictionary: Mapping[str, Any], ontology: Optional[femr.ontology.Ontology] = None):
         self.dictionary = dictionary
 
-        self.is_hierarchical = dictionary["is_hierarchical"]
+        self.is_hierarchical = dictionary.get("is_hierarchical", False)
 
         if self.is_hierarchical:
             assert ontology is not None
