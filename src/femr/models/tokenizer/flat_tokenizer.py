@@ -75,12 +75,14 @@ def map_statistics(
     *,
     num_subjects: int,
 ) -> Mapping[str, Any]:
-    age_stats = femr.stat_utils.OnlineStatistics()
+    age_stats = collections.defaultdict(femr.stat_utils.OnlineStatistics)
     code_counts: Dict[str, float] = collections.defaultdict(float)
 
     numeric_samples_by_lab = collections.defaultdict(functools.partial(femr.stat_utils.ReservoirSampler, 1_000))
 
     text_counts: Dict[Any, float] = collections.defaultdict(float)
+
+    last_time = None
 
     for subject in subjects:
         total_events = len(subject.events)
@@ -91,8 +93,17 @@ def map_statistics(
         weight = 1.0 / (num_subjects * total_events)
         birth_date = femr.pat_utils.get_subject_birthdate(subject)
         for event in subject.events:
-            if event.time is not None and event.time != birth_date:
-                age_stats.add(weight, (event.time - birth_date).total_seconds())
+            if event.time is not None and event.time.date() > birth_date.date():
+                age = (event.time - birth_date).total_seconds()
+                age_stats["age"].add(weight, age)
+                age_stats["log_age"].add(weight, math.log(1 + age))
+
+            if event.time is not None and event.time.date() > birth_date.date() and last_time is not None and last_time.date() > birth_date.date():
+                delta = (event.time - last_time).total_seconds()
+                age_stats["delta"].add(weight, delta)
+                age_stats["log_delta"].add(weight, math.log(1 + delta))
+
+            last_time = event.time
 
             assert numeric_samples_by_lab is not None
             if event.numeric_value is not None:
@@ -103,7 +114,7 @@ def map_statistics(
                 code_counts[event.code] += weight
 
     return {
-        "age_stats": age_stats,
+        "age_stats": dict(age_stats),
         "code_counts": code_counts,
         "text_counts": text_counts,
         "numeric_samples_by_lab": numeric_samples_by_lab,
