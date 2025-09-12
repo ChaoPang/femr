@@ -13,6 +13,7 @@ import torch.utils.data
 
 import femr.models.tokenizer
 import femr.pat_utils
+from femr.models.tasks import CLMBRTask
 
 
 def map_preliminary_batch_stats(
@@ -217,7 +218,12 @@ class BatchCreator:
                 # Now we have to consider whether or not to have labels for this time step
                 # The add_event function returns how many labels to assign for this time
                 if subsample_task_fraction == 1 or random.random() < subsample_task_fraction:
-                    num_added = self.task.add_event(last_time, event.time, features, actually_add=actually_add)
+                    if isinstance(self.task, CLMBRTask):
+                        clmbr_token_id = self.tokenizer.get_event_code_token(event)
+                        clmbr_features = [clmbr_token_id] if clmbr_token_id is not None else None
+                        num_added = self.task.add_event(last_time, event.time, clmbr_features, actually_add=actually_add)
+                    else:
+                        num_added = self.task.add_event(last_time, event.time, features, actually_add=actually_add)
                     for _ in range(num_added):
                         per_subject_label_indices.append(len(per_subject_ages) - 1)
 

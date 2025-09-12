@@ -3,7 +3,7 @@ import pathlib
 import meds_reader
 import pickle
 import femr.splits
-from femr.models.tokenizer.flat_tokenizer import train_tokenizer, FlatTokenizer
+from femr.models.tokenizer import HierarchicalTokenizer
 import femr.models.tasks
 import femr.models.processor
 from femr.omop_meds_tutorial.prepare_motor import create_omop_meds_tutorial_argparser
@@ -52,19 +52,20 @@ def main(args):
         tokenizer_path = pretraining_data_path / 'tokenizer'
         if not tokenizer_path.exists():
             print("Train tokenizer")
-            tokenizer = train_tokenizer(
+            tokenizer = HierarchicalTokenizer.train(
                 main_database,
                 vocab_size=1024 * 16,
+                ontology=ontology,
             )
             # Save the tokenizer to the same directory as the model
             tokenizer.save_pretrained(tokenizer_path)
         else:
-            tokenizer = FlatTokenizer.from_pretrained(tokenizer_path)
+            tokenizer = HierarchicalTokenizer.from_pretrained(tokenizer_path, ontology=ontology)
 
         task_path = pretraining_data_path / 'clmbr_task.pkl'
         if not task_path.exists():
             # Second, we need to prefit the MOTOR model. This is necessary because piecewise exponential models are unstable without an initial fit
-            clmbr_task = femr.models.tasks.CLMBRTask(clmbr_vocab_size=tokenizer.vocab_size)
+            clmbr_task = femr.models.tasks.CLMBRTask(clmbr_vocab_size=len(tokenizer.original_code_to_id))
             with open(task_path, 'wb') as f:
                 pickle.dump(clmbr_task, f)
 
