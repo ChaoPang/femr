@@ -352,6 +352,9 @@ def remove_first_dimension(data: Any) -> Any:
 
 class FEMRModel(transformers.PreTrainedModel):
     config_class = femr.models.config.FEMRModelConfig
+    # transformers >= 5.x reads this in from_pretrained's missing-key
+    # reconciliation; FEMR doesn't tie any weights, so an empty dict is correct.
+    all_tied_weights_keys: dict = {}
 
     def __init__(self, config: femr.models.config.FEMRModelConfig, **kwargs):
         # Allow the task config to be ovewritten
