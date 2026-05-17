@@ -18,8 +18,26 @@ LABEL_NAMES = [
     "death",
     "long_los",
 ]
-# LABEL_NAMES = ['long_los', '30d']
-ADMISSION_EVENTS = ["Visit/IP", "Visit/ERIP", "CMS Place of Service/51", "CMS Place of Service/61"]
+# Truveta encodes encounters as paired (start, end) events with code
+# "ENCOUNTER//<type>" and "ENCOUNTER_END//<type>", and event.end is always None.
+ADMISSION_START_CODES = ["ENCOUNTER//Inpatient encounter"]
+ADMISSION_END_CODES = ["ENCOUNTER_END//Inpatient encounter"]
+
+
+def _admission_ranges(subject: meds_reader.Subject) -> List:
+    """Pair admission starts with the next ENCOUNTER_END of the same kind via a sorted two-pointer scan."""
+    starts = sorted(e.time for e in subject.events if e.code in ADMISSION_START_CODES and e.time is not None)
+    ends = sorted(e.time for e in subject.events if e.code in ADMISSION_END_CODES and e.time is not None)
+    ranges = []
+    i = j = 0
+    while i < len(starts) and j < len(ends):
+        if ends[j] >= starts[i]:
+            ranges.append((starts[i], ends[j]))
+            i += 1
+            j += 1
+        else:
+            j += 1
+    return ranges
 
 
 class OmopInpatientMortalityLabeler(femr.labelers.Labeler):
@@ -27,17 +45,7 @@ class OmopInpatientMortalityLabeler(femr.labelers.Labeler):
         self.time_after_admission = time_after_admission
 
     def label(self, subject: meds_reader.Subject) -> List[meds.Label]:
-        admission_ranges = set()
-        death_times = set()
-
-        for event in subject.events:
-            if event.code in ADMISSION_EVENTS and event.end is not None:
-                if isinstance(event.end, datetime.datetime):
-                    admission_ranges.add((event.time, event.end))
-                else:
-                    admission_ranges.add((event.time, datetime.datetime.fromisoformat(event.end)))
-            if event.code == meds.death_code:
-                death_times.add(event.time)
+        death_times = {e.time for e in subject.events if e.code == meds.death_code}
 
         if len(death_times) not in [0, 1]:
             print(f"Warning: found {len(death_times)} death events in subject: {subject.subject_id}")
@@ -48,19 +56,15 @@ class OmopInpatientMortalityLabeler(femr.labelers.Labeler):
             death_time = datetime.datetime(9999, 1, 1)  # Very far in the future
 
         labels = []
-
-        for (admission_start, admission_end) in admission_ranges:
+        for (admission_start, admission_end) in _admission_ranges(subject):
             prediction_time = admission_start + self.time_after_admission
             if prediction_time >= admission_end:
                 continue
-
             if prediction_time >= death_time:
                 continue
-
             is_death = death_time < admission_end
             labels.append(
                 meds.Label(subject_id=subject.subject_id, prediction_time=prediction_time, boolean_value=is_death))
-
         return labels
 
 
@@ -70,26 +74,14 @@ class OmopLongAdmissionLabeler(femr.labelers.Labeler):
         self.admission_length = admission_length
 
     def label(self, subject: meds_reader.Subject) -> List[meds.Label]:
-        admission_ranges = set()
-
-        for event in subject.events:
-            if event.code in ADMISSION_EVENTS and event.end is not None:
-                if isinstance(event.end, datetime.datetime):
-                    admission_ranges.add((event.time, event.end))
-                else:
-                    admission_ranges.add((event.time, datetime.datetime.fromisoformat(event.end)))
-
         labels = []
-        for (admission_start, admission_end) in admission_ranges:
+        for (admission_start, admission_end) in _admission_ranges(subject):
             prediction_time = admission_start + self.time_after_admission
             if prediction_time >= admission_end:
                 continue
-
             is_long_admission = (admission_end - admission_start) > self.admission_length
-
             labels.append(meds.Label(subject_id=subject.subject_id, prediction_time=prediction_time,
                                      boolean_value=is_long_admission))
-
         return labels
 
 
@@ -122,7 +114,7 @@ def main():
     args = create_omop_meds_tutorial_arg_parser().parse_args()
     
     labels_path = Path(args.pretraining_data) / "labels"
-    labels_path.mkdir(exist_ok=False)
+    labels_path.mkdir(parents=True, exist_ok=True)
 
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in LABEL_NAMES:
