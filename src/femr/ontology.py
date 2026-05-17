@@ -28,7 +28,9 @@ class Ontology:
         self.parents_map: Dict[str, Set[str]] = collections.defaultdict(set)
 
         # Load from the athena path ...
-        concept = pl.scan_csv(os.path.join(athena_path, "CONCEPT.csv"), separator="\t", infer_schema_length=0)
+        concept = pl.scan_csv(
+            os.path.join(athena_path, "CONCEPT.csv"), separator="\t", infer_schema_length=0, quote_char=None
+        )
         code_col = pl.col("vocabulary_id") + "/" + pl.col("concept_code")
         description_col = pl.col("concept_name")
         concept_id_col = pl.col("concept_id").cast(pl.Int64)
@@ -54,7 +56,10 @@ class Ontology:
                 non_standard_concepts.add(concept_id)
 
         relationship = pl.scan_csv(
-            os.path.join(athena_path, "CONCEPT_RELATIONSHIP.csv"), separator="\t", infer_schema_length=0
+            os.path.join(athena_path, "CONCEPT_RELATIONSHIP.csv"),
+            separator="\t",
+            infer_schema_length=0,
+            quote_char=None,
         )
         relationship_id = pl.col("relationship_id")
         relationship = relationship.filter(
@@ -66,9 +71,13 @@ class Ontology:
             .rows()
         ):
             if concept_id_1 in non_standard_concepts:
+                if concept_id_1 not in concept_id_to_code_map or concept_id_2 not in concept_id_to_code_map:
+                    continue
                 self.parents_map[concept_id_to_code_map[concept_id_1]].add(concept_id_to_code_map[concept_id_2])
 
-        ancestor = pl.scan_csv(os.path.join(athena_path, "CONCEPT_ANCESTOR.csv"), separator="\t", infer_schema_length=0)
+        ancestor = pl.scan_csv(
+            os.path.join(athena_path, "CONCEPT_ANCESTOR.csv"), separator="\t", infer_schema_length=0, quote_char=None
+        )
         ancestor = ancestor.filter(pl.col("min_levels_of_separation") == "1")
         for concept_id, parent_concept_id in (
             ancestor.select(
@@ -77,6 +86,8 @@ class Ontology:
             .collect()
             .rows()
         ):
+            if concept_id not in concept_id_to_code_map or parent_concept_id not in concept_id_to_code_map:
+                continue
             self.parents_map[concept_id_to_code_map[concept_id]].add(concept_id_to_code_map[parent_concept_id])
 
         if code_metadata_path is not None:
@@ -156,12 +167,20 @@ class Ontology:
 
     def get_all_children(self, code: str) -> Set[str]:
         """Get all children, including through the ontology."""
-        if code not in self.all_children_map:
-            result = {code}
-            for child in self.children_map.get(code, set()):
-                result |= self.get_all_children(child)
-            self.all_children_map[code] = result
-        return self.all_children_map[code]
+        if code in self.all_children_map:
+            return self.all_children_map[code]
+        visited: Set[str] = set()
+        stack = [code]
+        while stack:
+            c = stack.pop()
+            if c in visited:
+                continue
+            visited.add(c)
+            for child in self.children_map.get(c, set()):
+                if child not in visited:
+                    stack.append(child)
+        self.all_children_map[code] = visited
+        return visited
 
     def get_all_children_for_codes(self, codes: Set[str]) -> Set[str]:
         result = set()
@@ -171,13 +190,20 @@ class Ontology:
 
     def get_all_parents(self, code: str) -> Set[str]:
         """Get all parents, including through the ontology."""
-        if code not in self.all_parents_map:
-            result = {code}
-            for parent in self.parents_map.get(code, set()):
-                result |= self.get_all_parents(parent)
-            self.all_parents_map[code] = result
-
-        return self.all_parents_map[code]
+        if code in self.all_parents_map:
+            return self.all_parents_map[code]
+        visited: Set[str] = set()
+        stack = [code]
+        while stack:
+            c = stack.pop()
+            if c in visited:
+                continue
+            visited.add(c)
+            for parent in self.parents_map.get(c, set()):
+                if parent not in visited:
+                    stack.append(parent)
+        self.all_parents_map[code] = visited
+        return visited
 
     def get_all_parents_for_codes(self, codes: Set[str]) -> Set[str]:
         result = set()

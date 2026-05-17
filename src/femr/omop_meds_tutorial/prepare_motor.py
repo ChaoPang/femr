@@ -10,6 +10,10 @@ import pandas as pd
 import polars as pl
 
 
+def _subjects_with_birth(subjects):
+    return [s.subject_id for s in subjects if any(e.code == "MEDS_BIRTH" for e in s.events)]
+
+
 def main(args):
     pretraining_data_path = pathlib.Path(args.pretraining_data)
     meds_reader_path = pathlib.Path(args.meds_reader)
@@ -24,6 +28,17 @@ def main(args):
 
     with meds_reader.SubjectDatabase(str(meds_reader_path), num_threads=num_threads) as database:
         subject_ids = [_ for _ in database]
+
+        # MOTOR / tokenizer / processor all require MEDS_BIRTH. Drop subjects that lack it.
+        subjects_with_birth = set()
+        for chunk in database.map(_subjects_with_birth):
+            subjects_with_birth.update(chunk)
+        dropped = [sid for sid in subject_ids if sid not in subjects_with_birth]
+        if dropped:
+            print(f"Dropping {len(dropped)} subject(s) without MEDS_BIRTH: "
+                  f"{dropped[:10]}{'...' if len(dropped) > 10 else ''}")
+        subject_ids = [sid for sid in subject_ids if sid in subjects_with_birth]
+
         ontology_path = pretraining_data_path / 'ontology.pkl'
         if not ontology_path.exists():
             print("Creating ontology")
@@ -61,7 +76,6 @@ def main(args):
                 main_database,
                 vocab_size=1024 * 16,
                 ontology=ontology,
-                num_proc=num_threads
             )
             # Save the tokenizer to the same directory as the model
             tokenizer.save_pretrained(tokenizer_path)
@@ -80,7 +94,6 @@ def main(args):
                 num_bins=8,
                 final_layer_size=512,
                 codes_to_skip=codes_to_skip,
-                num_proc=num_threads
             )
 
             with open(task_path, 'wb') as f:
