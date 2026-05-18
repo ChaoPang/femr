@@ -201,7 +201,7 @@ class SurvivalCalculator:
         for event in subject.events:
             if event.time is None:
                 continue
-            if event.code.split('/')[0] in ('LAB', 'MEDICATION', 'INFUSION_START', 'INFUSION_END'):
+            if event.code.split('/')[0] in ('LAB', 'MEDICATION', 'INFUSION_START', 'INFUSION_END', 'ENCOUNTER', 'ENCOUNTER_END'):
                 continue
             if event.numeric_value is not None or event.text_value is not None:
                 continue
