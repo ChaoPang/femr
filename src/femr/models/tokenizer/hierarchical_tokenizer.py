@@ -81,7 +81,7 @@ def map_statistics(
     code_counts: Dict[str, float] = collections.defaultdict(float)
 
     
-    bad_properties = {'code', 'time', 'visit_id', 'end'}
+    bad_properties = {'code', 'time', 'visit_id', 'end', 'encounter_id', 'source_record_id', 'subject_id'}
 
     property_samples = {
         k: {
