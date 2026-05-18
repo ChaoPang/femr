@@ -294,14 +294,19 @@ class MOTORTask(Task):
             num_bins: int,
             final_layer_size: int,
             codes_to_skip: List[str] = None,
+            codes_to_include: List[str] = None,
     ) -> MOTORTask:
-        tasks = []
+        codes_to_skip_set = set(codes_to_skip or [])
+        codes_to_include_set = set(codes_to_include or [])
+
+        # Force-include codes go in first, then fill remaining slots from tokenizer vocab.
+        tasks = list(codes_to_include_set)
         for dict_entry in tokenizer.dictionary["vocab"]:
             if dict_entry["type"] == "code":
-                # Skip the codes that are in the codes_to_skip
-                if codes_to_skip and dict_entry["code_string"] in codes_to_skip:
+                code = dict_entry["code_string"]
+                if code in codes_to_skip_set or code in codes_to_include_set:
                     continue
-                tasks.append(dict_entry["code_string"])
+                tasks.append(code)
                 if len(tasks) == num_tasks:
                     break
 
@@ -320,19 +325,26 @@ class MOTORTask(Task):
         task_data = []
 
         for task, task_stats in zip(tasks, stats):
+            is_forced = task in codes_to_include_set
             frac_events = task_stats[1] / (task_stats[0] + task_stats[1])
-            rate = frac_events / task_stats[2].mean()
+            mean_time = task_stats[2].mean()
+            rate = frac_events / mean_time if mean_time > 0 else 0
 
             if rate == 0:
-                print("Ran into task of rate 0?", task, frac_events, task_stats[0], task_stats[1], task_stats[2].mean())
-                continue
+                print("Ran into task of rate 0?", task, frac_events, task_stats[0], task_stats[1], mean_time)
+                if not is_forced:
+                    continue
+                warnings.warn(f"Force-included task {task} has rate 0; including with placeholder rate.")
+                rate = 1e-9
 
             if frac_events < 1 / 1000:
                 print("Ran into very rare task with less than 10 occurrences", task, frac_events, task_stats[0],
-                      task_stats[1], task_stats[2].mean())
-                continue
+                      task_stats[1], mean_time)
+                if not is_forced:
+                    continue
+                warnings.warn(f"Force-included task {task} is very rare (frac_events={frac_events:.6f}); including.")
 
-            task_data.append((task, rate, task_stats[0], task_stats[1], task_stats[2].mean()))
+            task_data.append((task, rate, task_stats[0], task_stats[1], mean_time))
 
         return MOTORTask(task_data, time_bins, final_layer_size)
 

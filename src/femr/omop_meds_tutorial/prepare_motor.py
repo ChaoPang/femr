@@ -20,10 +20,14 @@ def main(args):
     subject_splits_path = meds_reader_path / "metadata/subject_splits.parquet"
     code_metadata_path = meds_reader_path / "metadata/codes.parquet"
     codes_to_skip = []
+    codes_to_include = []
     num_threads = args.num_threads
     if args.motor_codes_to_skip:
         codes_to_skip = pl.read_parquet(args.motor_codes_to_skip)
         codes_to_skip = codes_to_skip["code"].to_list()
+    if args.motor_codes_to_include:
+        codes_to_include = pl.read_parquet(args.motor_codes_to_include)
+        codes_to_include = codes_to_include["code"].to_list()
 
 
     with meds_reader.SubjectDatabase(str(meds_reader_path), num_threads=num_threads) as database:
@@ -94,6 +98,7 @@ def main(args):
                 num_bins=8,
                 final_layer_size=512,
                 codes_to_skip=codes_to_skip,
+                codes_to_include=codes_to_include,
             )
 
             with open(task_path, 'wb') as f:
@@ -165,6 +170,14 @@ def create_omop_meds_tutorial_argparser():
         dest="motor_codes_to_skip",
         action="store",
         required=False,
+    )
+    parser.add_argument(
+        "--motor_codes_to_include",
+        dest="motor_codes_to_include",
+        action="store",
+        required=False,
+        help="Parquet file with a 'code' column listing codes that must be MOTOR task targets, "
+             "bypassing rate/rarity filters.",
     )
     parser.add_argument(
         "--num_threads",
