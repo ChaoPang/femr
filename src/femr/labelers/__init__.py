@@ -3,3 +3,4 @@
 from __future__ import annotations
 
 from femr.labelers.core import *  # noqa
+from femr.labelers.koa_tkr import TKRSinceKOALabeler  # noqa

@@ -17,6 +17,7 @@ from pathlib import Path
 LABEL_NAMES = [
     "death",
     "long_los",
+    "tkr_since_koa",
 ]
 # Truveta encodes encounters as paired (start, end) events with code
 # "ENCOUNTER//<type>" and "ENCOUNTER_END//<type>", and event.end is always None.
@@ -89,6 +90,9 @@ labelers: Mapping[str, femr.labelers.Labeler] = {
     'death': OmopInpatientMortalityLabeler(time_after_admission=datetime.timedelta(hours=48)),
     'long_los': OmopLongAdmissionLabeler(time_after_admission=datetime.timedelta(hours=48),
                                          admission_length=datetime.timedelta(days=7)),
+    'tkr_since_koa': femr.labelers.TKRSinceKOALabeler(
+        time_horizon=datetime.timedelta(days=365 * 5),
+    ),
 }
 
 
