@@ -197,6 +197,19 @@ def main():
                     gbm_test_predictions = gbm_output_dir / "test_predictions"
                     gbm_test_predictions.mkdir(exist_ok=True, parents=True)
                     lightgbm_predictions.write_parquet(gbm_test_predictions / "test_gbm_predictions.parquet")
+
+                    # Persist the final booster + optuna best params so
+                    # downstream feature-importance / SHAP analyses can load
+                    # the model instead of retraining from scratch.
+                    gbm_final.save_model(str(gbm_output_dir / "booster.txt"))
+                    save_to_json(
+                        {
+                            "best_params": best_params,
+                            "best_num_trees": best_num_trees,
+                            "best_trial_value": float(lightgbm_study.best_trial.value),
+                        },
+                        gbm_output_dir / "best_params.json",
+                    )
                 except Exception as e:
                     print(e)
 
@@ -219,6 +232,9 @@ def main():
                 }
 
                 save_to_json(logistic_results, logistic_metrics_output_file)
+
+                # Persist the fitted sklearn model alongside the metrics.
+                save_to_pickle(logistic_model, logistic_output_dir / "model.pkl")
 
                 logistic_predictions = pl.DataFrame({
                     "subject_id": test_data["subject_ids"].tolist(),
