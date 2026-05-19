@@ -77,23 +77,61 @@ TKR_SNOMED_CODES: frozenset[str] = frozenset(
 TKR_CODES: frozenset[str] = TKR_CPT4_CODES | TKR_SNOMED_CODES
 
 
+# Partial / unicompartmental knee replacement (PKR / UKA).
+# Patients with any of these codes at or before their first KOA event are
+# excluded from the cohort, since their knee disease history is fundamentally
+# different from a treatment-naive KOA patient.
+PKR_CPT4_CODES: frozenset[str] = frozenset(
+    {
+        "CPT4/27446",  # Arthroplasty, knee, condyle and plateau; medial OR lateral compartment (UKA)
+    }
+)
+
+PKR_SNOMED_CODES: frozenset[str] = frozenset(
+    {
+        "SNOMED/313064000",          # Unicompartmental knee joint prosthesis
+        "SNOMED/1231398006",         # Unicompartmental knee arthroplasty using robotic assistance
+        "SNOMED/1078651000119108",   # History of prosthetic unicompartmental arthroplasty of right knee
+        "SNOMED/1078681000119101",   # History of prosthetic unicompartmental arthroplasty of left knee
+        "SNOMED/1078711000119100",   # History of bilateral knee prosthetic unicompartmental arthroplasty
+    }
+)
+
+PKR_CODES: frozenset[str] = PKR_CPT4_CODES | PKR_SNOMED_CODES
+
+
 class TKRSinceKOALabeler(Labeler):
     """First-TKR-after-first-KOA, within a finite time horizon.
 
-    One label per subject (or none, if the subject has no KOA event or is censored).
+    One label per subject (or none, if the subject is excluded or censored).
+
+    Cohort rules:
+      * Subject must have a first KOA event.
+      * Subject must NOT have any PKR code at or before the first KOA event
+        (treats prior partial knee replacement as an exclusion criterion).
+      * The first TKR considered as an outcome must be strictly more than
+        `tkr_washout` after the first KOA event (removes same-encounter
+        KOA/TKR pairs that conflate diagnosis and procedure billing).
+      * Subject is censored (no label emitted) if their timeline ends before
+        `first_koa_time + prediction_time_offset + time_horizon` without a
+        qualifying TKR.
     """
 
     def __init__(
         self,
         koa_codes: Optional[Set[str]] = None,
         tkr_codes: Optional[Set[str]] = None,
+        pkr_codes: Optional[Set[str]] = None,
         time_horizon: datetime.timedelta = datetime.timedelta(days=365 * 5),
         prediction_time_offset: datetime.timedelta = datetime.timedelta(0),
+        tkr_washout: datetime.timedelta = datetime.timedelta(days=60),
     ):
         self.koa_codes: Set[str] = set(koa_codes) if koa_codes is not None else set(KOA_CODES)
         self.tkr_codes: Set[str] = set(tkr_codes) if tkr_codes is not None else set(TKR_CODES)
+        self.pkr_codes: Set[str] = set(pkr_codes) if pkr_codes is not None else set(PKR_CODES)
         self.time_horizon = time_horizon
         self.prediction_time_offset = prediction_time_offset
+        self.tkr_washout = tkr_washout
 
     def label(self, subject: meds_reader.Subject) -> List[meds.Label]:
         if not subject.events:
@@ -106,11 +144,14 @@ class TKRSinceKOALabeler(Labeler):
             if event.time is None:
                 continue
             if first_koa_time is None:
+                # Pre-KOA window: prior PKR is an exclusion criterion.
+                if event.code in self.pkr_codes:
+                    return []
                 if event.code in self.koa_codes:
                     first_koa_time = event.time
                 continue
-            # first_koa_time is set; look for the first TKR strictly after it
-            if event.code in self.tkr_codes and event.time > first_koa_time:
+            # first_koa_time is set; look for the first TKR strictly after washout.
+            if event.code in self.tkr_codes and event.time > first_koa_time + self.tkr_washout:
                 first_tkr_after_koa_time = event.time
                 break
 
