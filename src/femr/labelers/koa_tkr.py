@@ -77,6 +77,31 @@ TKR_SNOMED_CODES: frozenset[str] = frozenset(
 TKR_CODES: frozenset[str] = TKR_CPT4_CODES | TKR_SNOMED_CODES
 
 
+# "History of" knee arthroplasty SNOMED codes. These indicate that a TKR
+# *happened at some point* but the code itself is retrospective documentation,
+# so the procedure may have occurred years before the code is recorded.
+# Therefore these are used for COHORT EXCLUSION (any subject with one of these
+# before first KOA is dropped) but NOT for outcome detection — we don't want
+# a retrospective "history of TKR" coded after first KOA to count as a
+# positive outcome when the actual procedure could predate first KOA entirely.
+HISTORY_OF_TKR_CODES: frozenset[str] = frozenset(
+    {
+        "SNOMED/1078631000119102",  # History of right total knee replacement
+        "SNOMED/1078661000119105",  # History of left total knee replacement
+        "SNOMED/1078691000119103",  # History of bilateral total knee replacement
+        "SNOMED/1078641000119106",  # History of arthroplasty of right knee
+        "SNOMED/1078671000119104",  # History of arthroplasty of left knee
+        "SNOMED/1078701000119103",  # History of bilateral knee arthroplasty
+        "SNOMED/1211000119105",     # History of total knee arthroplasty
+        "SNOMED/674591000119103",   # History of revision of left total knee arthroplasty
+        "SNOMED/674601000119105",   # History of revision of right total knee arthroplasty
+        "SNOMED/16087931000119100", # History of revision of bilateral total knee joints
+        "SNOMED/10997641000119102", # History of right prosthetic knee joint removal due to infection
+        "SNOMED/10997811000119100", # History of left prosthetic knee joint removal due to infection
+    }
+)
+
+
 # Partial / unicompartmental knee replacement (PKR / UKA).
 # Patients with any of these codes at or before their first KOA event are
 # excluded from the cohort, since their knee disease history is fundamentally
@@ -100,6 +125,19 @@ PKR_SNOMED_CODES: frozenset[str] = frozenset(
 PKR_CODES: frozenset[str] = PKR_CPT4_CODES | PKR_SNOMED_CODES
 
 
+# Pre-KOA surgical-workup codes. Patients with any of these in their record
+# strictly before the first KOA event are excluded as not treatment-naive —
+# they entered the EHR already in a pre-arthroplasty workup, and their first
+# KOA diagnosis is a late catch-up code rather than a true index event.
+PRE_KOA_EXCLUSION_CODES: frozenset[str] = frozenset(
+    {
+        "CPT4/77073",  # Bone length studies (orthoroentgenogram / scanogram) —
+                       # standard pre-arthroplasty alignment / leg-length study;
+                       # 4× relative TKR risk vs cohort baseline.
+    }
+)
+
+
 class TKRSinceKOALabeler(Labeler):
     """First-TKR-after-first-KOA, within a finite time horizon.
 
@@ -107,13 +145,20 @@ class TKRSinceKOALabeler(Labeler):
 
     Cohort rules:
       * Subject must have a first KOA event.
-      * Subject must NOT have any PKR or TKR code strictly before the first
-        KOA event (treats any prior knee arthroplasty as an exclusion
-        criterion — most of these are contralateral-knee surgeries or
-        same-encounter coding artifacts and create label leakage if kept).
-      * The first TKR considered as an outcome must be strictly more than
-        `tkr_washout` after the first KOA event (removes same-encounter
-        KOA/TKR pairs that conflate diagnosis and procedure billing).
+      * Subject must NOT have any PKR, TKR, or "history of TKR" code strictly
+        before the first KOA event (treats any prior knee arthroplasty as an
+        exclusion criterion — most of these are contralateral-knee surgeries,
+        same-encounter coding artifacts, or retrospective documentation of
+        TKRs that happened outside the observation window).
+      * Subject must NOT have any `pre_koa_exclusion_codes` event strictly
+        before the first KOA event (e.g., bone-length studies — a pre-
+        arthroplasty workup marker that creates "workup precedes diagnosis"
+        leakage).
+      * The first TKR considered as an outcome must be a real TKR procedure
+        code in `tkr_codes` (NOT a `history_of_tkr_codes` entry, because
+        history-of codes are retrospective and could refer to surgeries
+        outside the prediction window) and strictly more than `tkr_washout`
+        after the first KOA event.
       * Subject is censored (no label emitted) if their timeline ends before
         `first_koa_time + prediction_time_offset + time_horizon` without a
         qualifying TKR.
@@ -124,6 +169,8 @@ class TKRSinceKOALabeler(Labeler):
         koa_codes: Optional[Set[str]] = None,
         tkr_codes: Optional[Set[str]] = None,
         pkr_codes: Optional[Set[str]] = None,
+        history_of_tkr_codes: Optional[Set[str]] = None,
+        pre_koa_exclusion_codes: Optional[Set[str]] = None,
         time_horizon: datetime.timedelta = datetime.timedelta(days=365 * 5),
         prediction_time_offset: datetime.timedelta = datetime.timedelta(0),
         tkr_washout: datetime.timedelta = datetime.timedelta(days=60),
@@ -131,6 +178,16 @@ class TKRSinceKOALabeler(Labeler):
         self.koa_codes: Set[str] = set(koa_codes) if koa_codes is not None else set(KOA_CODES)
         self.tkr_codes: Set[str] = set(tkr_codes) if tkr_codes is not None else set(TKR_CODES)
         self.pkr_codes: Set[str] = set(pkr_codes) if pkr_codes is not None else set(PKR_CODES)
+        self.history_of_tkr_codes: Set[str] = (
+            set(history_of_tkr_codes)
+            if history_of_tkr_codes is not None
+            else set(HISTORY_OF_TKR_CODES)
+        )
+        self.pre_koa_exclusion_codes: Set[str] = (
+            set(pre_koa_exclusion_codes)
+            if pre_koa_exclusion_codes is not None
+            else set(PRE_KOA_EXCLUSION_CODES)
+        )
         self.time_horizon = time_horizon
         self.prediction_time_offset = prediction_time_offset
         self.tkr_washout = tkr_washout
@@ -146,13 +203,17 @@ class TKRSinceKOALabeler(Labeler):
             if event.time is None:
                 continue
             if first_koa_time is None:
-                # Pre-KOA window: prior PKR *or* prior TKR is an exclusion
-                # criterion. Any knee arthroplasty before the first KOA
-                # diagnosis means the patient is not treatment-naive; their
-                # post-KOA TKR risk is dominated by the contralateral knee or
-                # same-encounter coding artifacts, which leak into features
-                # like CPT4/27447 and SNOMED/19063003.
-                if event.code in self.pkr_codes or event.code in self.tkr_codes:
+                # Pre-KOA window: any prior knee-arthroplasty code or surgical
+                # workup marker disqualifies the subject. History-of-TKR
+                # codes are included here (used only for exclusion, not for
+                # outcome detection) because they indicate a prior TKR even
+                # if the actual procedure event isn't in this dataset.
+                if (
+                    event.code in self.pkr_codes
+                    or event.code in self.tkr_codes
+                    or event.code in self.history_of_tkr_codes
+                    or event.code in self.pre_koa_exclusion_codes
+                ):
                     return []
                 if event.code in self.koa_codes:
                     first_koa_time = event.time
