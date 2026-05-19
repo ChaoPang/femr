@@ -107,8 +107,10 @@ class TKRSinceKOALabeler(Labeler):
 
     Cohort rules:
       * Subject must have a first KOA event.
-      * Subject must NOT have any PKR code at or before the first KOA event
-        (treats prior partial knee replacement as an exclusion criterion).
+      * Subject must NOT have any PKR or TKR code strictly before the first
+        KOA event (treats any prior knee arthroplasty as an exclusion
+        criterion — most of these are contralateral-knee surgeries or
+        same-encounter coding artifacts and create label leakage if kept).
       * The first TKR considered as an outcome must be strictly more than
         `tkr_washout` after the first KOA event (removes same-encounter
         KOA/TKR pairs that conflate diagnosis and procedure billing).
@@ -144,8 +146,13 @@ class TKRSinceKOALabeler(Labeler):
             if event.time is None:
                 continue
             if first_koa_time is None:
-                # Pre-KOA window: prior PKR is an exclusion criterion.
-                if event.code in self.pkr_codes:
+                # Pre-KOA window: prior PKR *or* prior TKR is an exclusion
+                # criterion. Any knee arthroplasty before the first KOA
+                # diagnosis means the patient is not treatment-naive; their
+                # post-KOA TKR risk is dominated by the contralateral knee or
+                # same-encounter coding artifacts, which leak into features
+                # like CPT4/27447 and SNOMED/19063003.
+                if event.code in self.pkr_codes or event.code in self.tkr_codes:
                     return []
                 if event.code in self.koa_codes:
                     first_koa_time = event.time
