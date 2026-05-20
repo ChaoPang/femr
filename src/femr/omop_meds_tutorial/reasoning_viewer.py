@@ -158,6 +158,11 @@ def main() -> None:
         ),
     )
 
+    def _fmt_date(val) -> str:
+        if val is None:
+            return "—"
+        return str(val)[:10]  # keep YYYY-MM-DD, drop time component
+
     row0 = summary.filter(pl.col("subject_id") == selected).to_dicts()[0]
     cols = st.columns([1, 1, 1, 1, 1, 1]) if has_outcome else st.columns([1, 1, 1, 1])
     cols[0].metric("subject_id", f"{row0['subject_id']}")
@@ -166,13 +171,13 @@ def main() -> None:
         "predicted P(TKR)",
         f"{row0['predicted_prob']:.4f}" if row0["predicted_prob"] is not None else "N/A (not test)",
     )
-    cols[3].metric("prediction_time", str(row0["prediction_time"]))
+    cols[3].metric("prediction_time", _fmt_date(row0["prediction_time"]))
     if has_outcome:
         outcome = row0.get("outcome_time")
         d2o = row0.get("days_to_outcome")
         cols[4].metric(
             "outcome_time (TKR)",
-            str(outcome) if outcome is not None else "—",
+            _fmt_date(outcome),
         )
         cols[5].metric(
             "days to TKR",
