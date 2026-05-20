@@ -107,12 +107,17 @@ def main() -> None:
                         "(must match the value used by TKRSinceKOALabeler).")
     p.add_argument("--num_threads", type=int, default=16,
                    help="Worker threads for the meds_reader scan.")
+    p.add_argument("--features_path", default=None,
+                   help="Override the features pickle path. Defaults to "
+                        "features/<cohort_label>_motor.pkl. Use this to point at "
+                        "a variant like features/<label>_motor_pubmedbert_k64.pkl.")
     args = p.parse_args()
 
     pretraining_data = pathlib.Path(args.pretraining_data)
     label = args.cohort_label
 
-    features_path = pretraining_data / "features" / f"{label}_motor.pkl"
+    features_path = pathlib.Path(args.features_path) if args.features_path else \
+        pretraining_data / "features" / f"{label}_motor.pkl"
     labels_path = pretraining_data / "labels" / f"{label}.parquet"
     preds_dir = pretraining_data / "results" / label / args.results_subdir / "test_predictions"
     tok_path = pretraining_data / "tokenizer" / "dictionary.msgpack"
