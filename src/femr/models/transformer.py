@@ -382,10 +382,27 @@ class ReasoningLayer(nn.Module):
                 ))
 
     def forward(
-        self, hidden_state: torch.Tensor
+        self,
+        hidden_state: torch.Tensor,
+        history_mask: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Project hidden state -> vocab logits -> top-k softmax -> weighted sum of
+        reasoning embeddings.
+
+        If ``history_mask`` is given (shape [N, V], bool), vocab logits at False
+        entries are forced to -inf so the top-k selection cannot pick them. Used
+        with reasoning_constrain_to_history to restrict attention to tokens that
+        actually appear in each prediction's patient history.
+
+        When the mask has fewer than ``top_k`` True entries for a row, topk still
+        returns ``top_k`` indices but the masked ones carry weight ~0 after the
+        softmax (exp(-inf) = 0). A row with zero valid tokens would yield NaNs;
+        callers should guarantee at least one valid token per row.
+        """
         # hidden_state: [N, hidden_size]
         logits = self.vocab_projection(hidden_state)             # [N, V]
+        if history_mask is not None:
+            logits = logits.masked_fill(~history_mask, float("-inf"))
         top_vals, top_idx = logits.topk(self.top_k, dim=-1)      # [N, k], [N, k]
         weights = torch.softmax(top_vals, dim=-1)                # [N, k]
         top_embeds = self.reasoning_embedding(top_idx)           # [N, k, hidden]
@@ -421,6 +438,63 @@ class FEMRModel(transformers.PreTrainedModel):
             )
         if self.config.task_config is not None:
             self.task_model = self.create_task_head()
+
+    def _build_reasoning_history_mask(
+        self, batch: Mapping[str, Any], segment_ids: torch.Tensor
+    ) -> torch.Tensor:
+        """Return a (n_labels, V) boolean mask: True for vocab tokens that occur in the
+        same patient's tokenized history *at or before* each label's position in the
+        packed batch.
+
+        MOTOR packs multiple patients into one flat sequence; we use ``segment_ids``
+        (computed once per batch from subject_ids transitions) to constrain "same
+        patient" without crossing pack boundaries. For each (segment, vocab_idx)
+        pair we record the *earliest* batch-position where that vocab idx appears
+        in that patient; a label at batch-position p can attend to vocab v iff
+        earliest[segment_of_p, v] <= p.
+        """
+        tcfg = self.config.transformer_config
+        V = tcfg.vocab_size
+        tb = batch["transformer"]
+        label_indices = tb["label_indices"].long()
+        device = label_indices.device
+        seg = segment_ids.long()
+        n_segments = int(seg.max().item()) + 1 if seg.numel() else 0
+        if n_segments == 0:
+            return torch.zeros(label_indices.shape[0], V, dtype=torch.bool, device=device)
+
+        # Per-token (segment, token, position) triples
+        if tcfg.is_hierarchical:
+            tokens = tb["hierarchical_tokens"].long().view(-1)
+            token_indices = tb["token_indices"].long().view(-1)
+            n_positions = seg.shape[0]
+            # token_indices has length n_positions+1 (boundaries). Per-position bag length:
+            position_lengths = token_indices[1:] - token_indices[:-1]
+            token_position = torch.repeat_interleave(
+                torch.arange(n_positions, device=device, dtype=torch.long),
+                position_lengths,
+            )
+            token_segment = torch.repeat_interleave(seg, position_lengths)
+        else:
+            tokens = tb["tokens"].long().view(-1)
+            n_positions = tokens.shape[0]
+            token_position = torch.arange(n_positions, device=device, dtype=torch.long)
+            token_segment = seg
+
+        # earliest[seg, vocab_idx] = min position at which vocab_idx appears in segment.
+        # Use a flat tensor + scatter_reduce_(reduce='amin') with a large sentinel.
+        LARGE = torch.iinfo(torch.long).max
+        earliest_flat = torch.full((n_segments * V,), LARGE, dtype=torch.long, device=device)
+        flat_idx = token_segment * V + tokens
+        earliest_flat.scatter_reduce_(
+            0, flat_idx, token_position, reduce="amin", include_self=True
+        )
+        earliest = earliest_flat.view(n_segments, V)
+
+        # For each label: gather its segment's earliest row, then compare to label position.
+        label_segments = seg[label_indices]
+        history_mask = earliest[label_segments] <= label_indices.unsqueeze(-1)
+        return history_mask
 
     @staticmethod
     def _load_reasoning_embedding_init(
@@ -519,7 +593,12 @@ class FEMRModel(transformers.PreTrainedModel):
             features = features.reshape(-1, features.shape[-1])
             features = features[batch["transformer"]["label_indices"], :]
             if self.config.transformer_config.use_reasoning_layer:
-                reasoning_out, reasoning_token_ids, reasoning_weights = self.reasoning_layer(features)
+                history_mask = None
+                if self.config.transformer_config.reasoning_constrain_to_history:
+                    history_mask = self._build_reasoning_history_mask(batch, s)
+                reasoning_out, reasoning_token_ids, reasoning_weights = self.reasoning_layer(
+                    features, history_mask=history_mask
+                )
                 alpha = self.config.transformer_config.reasoning_weight
                 features = alpha * reasoning_out + (1.0 - alpha) * features
             loss, result = self.task_model(features, batch["task"], return_logits=return_logits)

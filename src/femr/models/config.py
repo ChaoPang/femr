@@ -22,6 +22,7 @@ class FEMRTransformerConfig(transformers.PretrainedConfig):
         reasoning_top_k: int = 32,
         reasoning_weight: float = 1.0,
         reasoning_embedding_init_path: Optional[str] = None,
+        reasoning_constrain_to_history: bool = False,
         **kwargs,
     ) -> None:
         """Defined a configuration for a FEMR Transformer.
@@ -49,6 +50,14 @@ class FEMRTransformerConfig(transformers.PretrainedConfig):
                   * Full https URL like https://huggingface.co/<repo>/resolve/<rev>/<file>
                 The init only takes effect when the model is constructed from scratch; when
                 loading from a trained checkpoint, the saved state_dict overrides it.
+            reasoning_constrain_to_history: If True, the reasoning layer's top-k selection
+                is restricted to vocab tokens that appear in the *same patient's* tokenized
+                history at or before each prediction position. Honors MOTOR's sample-packing
+                convention (multiple patients' tokens interleaved in one flat sequence) by
+                using the per-position segment IDs derived from subject_ids — so a prediction
+                at position p cannot attend to tokens that belong to a different patient
+                packed later in the same batch, nor to future tokens within the same patient.
+                Vocab logits for out-of-history tokens are masked to -inf before topk.
         """
         super().__init__(**kwargs)
 
@@ -70,6 +79,7 @@ class FEMRTransformerConfig(transformers.PretrainedConfig):
         self.reasoning_top_k = reasoning_top_k
         self.reasoning_weight = reasoning_weight
         self.reasoning_embedding_init_path = reasoning_embedding_init_path
+        self.reasoning_constrain_to_history = reasoning_constrain_to_history
 
 
 class FEMRTaskConfig(transformers.PretrainedConfig):

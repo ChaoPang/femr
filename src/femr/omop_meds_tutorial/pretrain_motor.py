@@ -82,6 +82,15 @@ class MotorArguments:
                     "warm-start the reasoning layer with text-derived concept embeddings."
         },
     )
+    reasoning_constrain_to_history: bool = dataclasses.field(
+        default=False,
+        metadata={
+            "help": "If True, restrict the reasoning layer's top-k vocab selection to "
+                    "tokens that occur in the *same patient's* tokenized history at or "
+                    "before each prediction position. Honors MOTOR's sample-packing "
+                    "(multiple patients per batch) via per-position segment IDs."
+        },
+    )
 
 
 def parse_arguments()-> (
@@ -130,6 +139,7 @@ def main():
         reasoning_top_k=motor_args.reasoning_top_k,
         reasoning_weight=motor_args.reasoning_weight,
         reasoning_embedding_init_path=motor_args.reasoning_embedding_init_path,
+        reasoning_constrain_to_history=motor_args.reasoning_constrain_to_history,
     )
 
     config = femr.models.config.FEMRModelConfig.from_transformer_task_configs(
