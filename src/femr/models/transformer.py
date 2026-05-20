@@ -527,6 +527,8 @@ def compute_features(
     all_subject_ids = []
     all_feature_times = []
     all_representations = []
+    all_reasoning_token_ids = []
+    all_reasoning_weights = []
 
     with torch.no_grad():
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -551,6 +553,9 @@ def compute_features(
                 all_subject_ids.append(result["subject_ids"].to(cpu_device, non_blocking=True))
                 all_feature_times.append(result["timestamps"].to(cpu_device, non_blocking=True))
                 all_representations.append(result["representations"].to(cpu_device, non_blocking=True))
+                if "reasoning_token_ids" in result:
+                    all_reasoning_token_ids.append(result["reasoning_token_ids"].to(cpu_device, non_blocking=True))
+                    all_reasoning_weights.append(result["reasoning_weights"].to(cpu_device, non_blocking=True))
 
     torch.cuda.synchronize()
 
@@ -558,8 +563,12 @@ def compute_features(
     all_feature_times_np = torch.concatenate(all_feature_times).numpy()
     all_representations_np = torch.concatenate(all_representations).numpy()
 
-    return {
+    output = {
         "subject_ids": all_subject_ids_np,
         "feature_times": all_feature_times_np.astype("datetime64[s]"),
         "features": all_representations_np,
     }
+    if all_reasoning_token_ids:
+        output["reasoning_token_ids"] = torch.concatenate(all_reasoning_token_ids).numpy()
+        output["reasoning_weights"] = torch.concatenate(all_reasoning_weights).numpy()
+    return output
