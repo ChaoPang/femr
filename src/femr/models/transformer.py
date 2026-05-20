@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import math
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 from dataclasses import dataclass
@@ -359,11 +360,26 @@ class ReasoningLayer(nn.Module):
     for interpretability.
     """
 
-    def __init__(self, hidden_size: int, vocab_size: int, top_k: int):
+    def __init__(
+        self,
+        hidden_size: int,
+        vocab_size: int,
+        top_k: int,
+        init_embedding: Optional[torch.Tensor] = None,
+    ):
         super().__init__()
         self.top_k = top_k
         self.vocab_projection = nn.Linear(hidden_size, vocab_size, bias=False)
         self.reasoning_embedding = nn.Embedding(vocab_size, hidden_size)
+        if init_embedding is not None:
+            assert init_embedding.shape == (vocab_size, hidden_size), (
+                f"reasoning_embedding init must be ({vocab_size}, {hidden_size}); "
+                f"got {tuple(init_embedding.shape)}"
+            )
+            with torch.no_grad():
+                self.reasoning_embedding.weight.copy_(init_embedding.to(
+                    dtype=self.reasoning_embedding.weight.dtype
+                ))
 
     def forward(
         self, hidden_state: torch.Tensor
@@ -392,13 +408,88 @@ class FEMRModel(transformers.PreTrainedModel):
 
         self.transformer = FEMRTransformer(self.config.transformer_config)
         if self.config.transformer_config.use_reasoning_layer:
+            init_embedding = self._load_reasoning_embedding_init(
+                self.config.transformer_config.reasoning_embedding_init_path,
+                self.config.transformer_config.vocab_size,
+                self.config.transformer_config.hidden_size,
+            )
             self.reasoning_layer = ReasoningLayer(
                 hidden_size=self.config.transformer_config.hidden_size,
                 vocab_size=self.config.transformer_config.vocab_size,
                 top_k=self.config.transformer_config.reasoning_top_k,
+                init_embedding=init_embedding,
             )
         if self.config.task_config is not None:
             self.task_model = self.create_task_head()
+
+    @staticmethod
+    def _load_reasoning_embedding_init(
+        path: Optional[str], vocab_size: int, hidden_size: int
+    ) -> Optional[torch.Tensor]:
+        """Load a (vocab_size, hidden_size) initializer for the reasoning embedding.
+
+        Accepts three location forms:
+          * Local filesystem path.
+          * Hugging Face Hub identifier, hf://<repo_id>/<filename> (e.g.,
+            hf://trialspark/femr-reasoning-init/reasoning_init.pt). The first
+            path component after the scheme is the repo_id (may itself contain
+            a "/"); the last component is the filename.
+          * Full https URL like https://huggingface.co/<repo_id>/resolve/<rev>/<file>.
+
+        Returns None if `path` is unset or cannot be resolved. The reasoning
+        embedding then falls back to nn.Embedding's default init; a subsequent
+        state_dict load (e.g., from a saved checkpoint) overrides whatever is
+        there.
+        """
+        if not path:
+            return None
+        resolved = FEMRModel._resolve_reasoning_init_uri(path)
+        if resolved is None:
+            print(f"[FEMRModel] could not resolve reasoning_embedding_init_path="
+                  f"{path!r}; skipping init.", flush=True)
+            return None
+        tensor = torch.load(resolved, map_location="cpu", weights_only=True)
+        if tensor.shape != (vocab_size, hidden_size):
+            raise ValueError(
+                f"reasoning_embedding init tensor at {resolved} has shape "
+                f"{tuple(tensor.shape)}; expected ({vocab_size}, {hidden_size})"
+            )
+        return tensor
+
+    @staticmethod
+    def _resolve_reasoning_init_uri(path: str) -> Optional[str]:
+        """Resolve a local path or an HF Hub reference into a local file path."""
+        # 1) https://huggingface.co/<repo_id>/resolve/<rev>/<filename>
+        if path.startswith("https://huggingface.co/") or path.startswith("http://huggingface.co/"):
+            # Strip scheme + host
+            tail = path.split("huggingface.co/", 1)[1]
+            if "/resolve/" not in tail:
+                raise ValueError(
+                    f"Unsupported huggingface.co URL: {path!r}. Expected "
+                    f"https://huggingface.co/<repo_id>/resolve/<rev>/<filename>"
+                )
+            repo_id, after = tail.split("/resolve/", 1)
+            rev, _, filename = after.partition("/")
+            from huggingface_hub import hf_hub_download
+            return hf_hub_download(repo_id=repo_id, filename=filename, revision=rev or None)
+        # 2) hf://<repo_id...>/<filename>
+        if path.startswith("hf://"):
+            tail = path[len("hf://"):]
+            if "/" not in tail:
+                raise ValueError(
+                    f"Bad hf:// reference {path!r}; expected hf://<repo_id>/<filename>"
+                )
+            repo_id, _, filename = tail.rpartition("/")
+            if not repo_id or not filename:
+                raise ValueError(
+                    f"Bad hf:// reference {path!r}; expected hf://<repo_id>/<filename>"
+                )
+            from huggingface_hub import hf_hub_download
+            return hf_hub_download(repo_id=repo_id, filename=filename)
+        # 3) Local path
+        if os.path.exists(path):
+            return path
+        return None
 
     def create_task_head(self) -> nn.Module:
         hidden_size = self.config.transformer_config.hidden_size

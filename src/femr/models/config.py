@@ -21,6 +21,7 @@ class FEMRTransformerConfig(transformers.PretrainedConfig):
         use_reasoning_layer: bool = False,
         reasoning_top_k: int = 32,
         reasoning_weight: float = 1.0,
+        reasoning_embedding_init_path: Optional[str] = None,
         **kwargs,
     ) -> None:
         """Defined a configuration for a FEMR Transformer.
@@ -39,6 +40,15 @@ class FEMRTransformerConfig(transformers.PretrainedConfig):
             use_reasoning_layer: Whether to insert a vocab-attention reasoning layer before task heads
             reasoning_top_k: Number of top vocab tokens to attend over in the reasoning layer
             reasoning_weight: Mixing weight alpha; output = alpha*reasoning + (1-alpha)*hidden_state
+            reasoning_embedding_init_path: Optional location of a (vocab_size, hidden_size)
+                torch tensor used to initialize the reasoning_embedding weight. Three forms
+                are accepted:
+                  * Local filesystem path.
+                  * hf://<repo_id>/<filename>, e.g.,
+                    hf://trialspark/femr-reasoning-init/reasoning_init.pt
+                  * Full https URL like https://huggingface.co/<repo>/resolve/<rev>/<file>
+                The init only takes effect when the model is constructed from scratch; when
+                loading from a trained checkpoint, the saved state_dict overrides it.
         """
         super().__init__(**kwargs)
 
@@ -59,6 +69,7 @@ class FEMRTransformerConfig(transformers.PretrainedConfig):
         self.use_reasoning_layer = use_reasoning_layer
         self.reasoning_top_k = reasoning_top_k
         self.reasoning_weight = reasoning_weight
+        self.reasoning_embedding_init_path = reasoning_embedding_init_path
 
 
 class FEMRTaskConfig(transformers.PretrainedConfig):

@@ -72,6 +72,16 @@ class MotorArguments:
             "help": "Mixing weight alpha for the reasoning layer output (1.0 = full replace, 0.0 = hidden state only)"
         },
     )
+    reasoning_embedding_init_path: Optional[str] = dataclasses.field(
+        default=None,
+        metadata={
+            "help": "Optional location of a (vocab_size, hidden_size) torch tensor used to "
+                    "initialize the reasoning_embedding weight. Accepts a local path, a "
+                    "hf://<repo_id>/<filename> reference, or an https://huggingface.co/... "
+                    "URL. Build the tensor with embed_vocab.py (PubMedBERT, etc.) to "
+                    "warm-start the reasoning layer with text-derived concept embeddings."
+        },
+    )
 
 
 def parse_arguments()-> (
@@ -119,6 +129,7 @@ def main():
         use_reasoning_layer=motor_args.use_reasoning_layer,
         reasoning_top_k=motor_args.reasoning_top_k,
         reasoning_weight=motor_args.reasoning_weight,
+        reasoning_embedding_init_path=motor_args.reasoning_embedding_init_path,
     )
 
     config = femr.models.config.FEMRModelConfig.from_transformer_task_configs(
