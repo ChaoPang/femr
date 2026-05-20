@@ -12,6 +12,7 @@ import numpy as np
 import scipy.sparse
 import torch
 import warnings
+from tqdm import tqdm
 
 import femr.models.config
 import femr.models.tokenizer
@@ -331,7 +332,12 @@ class MOTORTask(Task):
             warnings.warn(f"Could not find enough tasks in the provided tokenizer {len(tasks)}")
 
         length_samples, stats = functools.reduce(
-            _prefit_motor_agg, db.map(functools.partial(_prefit_motor_map, tasks=tasks, ontology=tokenizer.ontology))
+            _prefit_motor_agg,
+            tqdm(
+                db.map(functools.partial(_prefit_motor_map, tasks=tasks, ontology=tokenizer.ontology)),
+                total=getattr(db, "_num_threads", None),
+                desc="MOTOR task fit",
+            ),
         )
 
         time_bins = np.percentile(length_samples.samples, np.linspace(0, 100, num_bins + 1))
