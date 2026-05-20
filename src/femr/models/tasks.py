@@ -238,11 +238,23 @@ class SurvivalCalculator:
 def _prefit_motor_map(
         subjects: Iterator[meds_reader.Subject], *, tasks: List[str], ontology: femr.ontology.Ontology
 ) -> Any:
+    import os
+    import time as _time
     task_time_stats: List[Any] = [[0, 0, femr.stat_utils.OnlineStatistics()] for _ in range(len(tasks))]
     event_times = femr.stat_utils.ReservoirSampler(100_000)
     task_set = set(tasks)
 
-    for subject in subjects:
+    _worker_pid = os.getpid()
+    _worker_t0 = _time.time()
+    _worker_log_every = 100
+
+    for _subject_idx, subject in enumerate(subjects):
+        if _subject_idx % _worker_log_every == 0:
+            print(
+                f"[prefit_motor worker pid={_worker_pid}] subject {_subject_idx} "
+                f"(elapsed {_time.time() - _worker_t0:.0f}s)",
+                flush=True,
+            )
         calculator = SurvivalCalculator(ontology, subject, task_set)
 
         birth = femr.pat_utils.get_subject_birthdate(subject)
@@ -272,6 +284,11 @@ def _prefit_motor_map(
                     task_time_stats[i][1] += 1
                 task_time_stats[i][2].add(1, time.total_seconds())
 
+    print(
+        f"[prefit_motor worker pid={_worker_pid}] DONE — {_subject_idx + 1} subjects "
+        f"in {_time.time() - _worker_t0:.0f}s",
+        flush=True,
+    )
     return (event_times, task_time_stats)
 
 
