@@ -18,6 +18,9 @@ class FEMRTransformerConfig(transformers.PretrainedConfig):
         use_normed_ages: bool = False,
         use_bias: bool = True,
         hidden_act: str = "gelu",
+        use_reasoning_layer: bool = False,
+        reasoning_top_k: int = 32,
+        reasoning_weight: float = 1.0,
         **kwargs,
     ) -> None:
         """Defined a configuration for a FEMR Transformer.
@@ -33,6 +36,9 @@ class FEMRTransformerConfig(transformers.PretrainedConfig):
             use_normed_ages: Whether or not to provide normalized ages as a feature to the model
             use_bias: Whether or not to use bias terms in the transformer layers
             hidden_act: The type of activation function to use in the transformer
+            use_reasoning_layer: Whether to insert a vocab-attention reasoning layer before task heads
+            reasoning_top_k: Number of top vocab tokens to attend over in the reasoning layer
+            reasoning_weight: Mixing weight alpha; output = alpha*reasoning + (1-alpha)*hidden_state
         """
         super().__init__(**kwargs)
 
@@ -49,6 +55,10 @@ class FEMRTransformerConfig(transformers.PretrainedConfig):
 
         self.use_bias = use_bias
         self.hidden_act = hidden_act
+
+        self.use_reasoning_layer = use_reasoning_layer
+        self.reasoning_top_k = reasoning_top_k
+        self.reasoning_weight = reasoning_weight
 
 
 class FEMRTaskConfig(transformers.PretrainedConfig):

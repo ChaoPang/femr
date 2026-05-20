@@ -350,6 +350,33 @@ def remove_first_dimension(data: Any) -> Any:
         raise RuntimeError("Could not convert item of type " + str(type(data)))
 
 
+class ReasoningLayer(nn.Module):
+    """Sparse vocab-attention reasoning layer.
+
+    Projects each hidden state to vocab logits, selects the top-k tokens,
+    softmax-weights them, and returns a weighted sum over a dedicated
+    reasoning embedding table along with the token indices and weights
+    for interpretability.
+    """
+
+    def __init__(self, hidden_size: int, vocab_size: int, top_k: int):
+        super().__init__()
+        self.top_k = top_k
+        self.vocab_projection = nn.Linear(hidden_size, vocab_size, bias=False)
+        self.reasoning_embedding = nn.Embedding(vocab_size, hidden_size)
+
+    def forward(
+        self, hidden_state: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # hidden_state: [N, hidden_size]
+        logits = self.vocab_projection(hidden_state)             # [N, V]
+        top_vals, top_idx = logits.topk(self.top_k, dim=-1)      # [N, k], [N, k]
+        weights = torch.softmax(top_vals, dim=-1)                # [N, k]
+        top_embeds = self.reasoning_embedding(top_idx)           # [N, k, hidden]
+        output = (weights.unsqueeze(-1) * top_embeds).sum(dim=1) # [N, hidden]
+        return output, top_idx, weights
+
+
 class FEMRModel(transformers.PreTrainedModel):
     config_class = femr.models.config.FEMRModelConfig
     # transformers >= 5.x reads this in from_pretrained's missing-key
@@ -364,6 +391,12 @@ class FEMRModel(transformers.PreTrainedModel):
         super().__init__(config)
 
         self.transformer = FEMRTransformer(self.config.transformer_config)
+        if self.config.transformer_config.use_reasoning_layer:
+            self.reasoning_layer = ReasoningLayer(
+                hidden_size=self.config.transformer_config.hidden_size,
+                vocab_size=self.config.transformer_config.vocab_size,
+                top_k=self.config.transformer_config.reasoning_top_k,
+            )
         if self.config.task_config is not None:
             self.task_model = self.create_task_head()
 
@@ -394,7 +427,14 @@ class FEMRModel(transformers.PreTrainedModel):
         if "task" in batch and self.config.task_config is not None:
             features = features.reshape(-1, features.shape[-1])
             features = features[batch["transformer"]["label_indices"], :]
+            if self.config.transformer_config.use_reasoning_layer:
+                reasoning_out, reasoning_token_ids, reasoning_weights = self.reasoning_layer(features)
+                alpha = self.config.transformer_config.reasoning_weight
+                features = alpha * reasoning_out + (1.0 - alpha) * features
             loss, result = self.task_model(features, batch["task"], return_logits=return_logits)
+            if self.config.transformer_config.use_reasoning_layer and (return_logits or return_reprs):
+                result["reasoning_token_ids"] = reasoning_token_ids  # [N, k] — top-k vocab indices
+                result["reasoning_weights"] = reasoning_weights      # [N, k] — softmax weights
             if return_reprs:
                 result["representations"] = features
             if return_logits or return_reprs:

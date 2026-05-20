@@ -54,6 +54,24 @@ class MotorArguments:
             "help": "Pretraining data folder"
         },
     )
+    use_reasoning_layer: bool = dataclasses.field(
+        default=False,
+        metadata={
+            "help": "Whether to insert a vocab-attention reasoning layer before the task head"
+        },
+    )
+    reasoning_top_k: int = dataclasses.field(
+        default=32,
+        metadata={
+            "help": "Number of top vocab tokens to attend over in the reasoning layer"
+        },
+    )
+    reasoning_weight: float = dataclasses.field(
+        default=1.0,
+        metadata={
+            "help": "Mixing weight alpha for the reasoning layer output (1.0 = full replace, 0.0 = hidden state only)"
+        },
+    )
 
 
 def parse_arguments()-> (
@@ -98,6 +116,9 @@ def main():
         use_normed_ages=True,
         use_bias=False,
         hidden_act='swiglu',
+        use_reasoning_layer=motor_args.use_reasoning_layer,
+        reasoning_top_k=motor_args.reasoning_top_k,
+        reasoning_weight=motor_args.reasoning_weight,
     )
 
     config = femr.models.config.FEMRModelConfig.from_transformer_task_configs(
