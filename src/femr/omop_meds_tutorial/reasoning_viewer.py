@@ -115,17 +115,23 @@ def main() -> None:
 
     # ---- cohort table at the top ----
     st.subheader("Cohort summary")
+    has_outcome = "outcome_time" in summary.columns
+    cols = ["subject_id", "prediction_time", "ground_truth", "predicted_prob", "in_test_set"]
+    if has_outcome:
+        cols += ["outcome_time", "days_to_outcome"]
     st.dataframe(
         summary.with_columns([
             pl.col("true_label").alias("ground_truth"),
             pl.col("predicted_prob").round(4).alias("predicted_prob"),
-        ]).sort("predicted_prob", descending=True, nulls_last=True),
+        ]).select(cols).sort("predicted_prob", descending=True, nulls_last=True),
         use_container_width=True,
         height=240,
         column_config={
             "subject_id": st.column_config.NumberColumn(format="%d"),
             "prediction_time": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),
             "predicted_prob": st.column_config.NumberColumn(format="%.4f"),
+            "outcome_time": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),
+            "days_to_outcome": st.column_config.NumberColumn(format="%d"),
         },
     )
 
@@ -150,14 +156,25 @@ def main() -> None:
     )
 
     row0 = summary.filter(pl.col("subject_id") == selected).to_dicts()[0]
-    col_a, col_b, col_c, col_d = st.columns([1, 1, 1, 1])
-    col_a.metric("subject_id", f"{row0['subject_id']}")
-    col_b.metric("ground truth", "TRUE" if row0["true_label"] else "FALSE")
-    col_c.metric(
+    cols = st.columns([1, 1, 1, 1, 1, 1]) if has_outcome else st.columns([1, 1, 1, 1])
+    cols[0].metric("subject_id", f"{row0['subject_id']}")
+    cols[1].metric("ground truth", "TRUE" if row0["true_label"] else "FALSE")
+    cols[2].metric(
         "predicted P(TKR)",
         f"{row0['predicted_prob']:.4f}" if row0["predicted_prob"] is not None else "N/A (not test)",
     )
-    col_d.metric("prediction_time", str(row0["prediction_time"]))
+    cols[3].metric("prediction_time", str(row0["prediction_time"]))
+    if has_outcome:
+        outcome = row0.get("outcome_time")
+        d2o = row0.get("days_to_outcome")
+        cols[4].metric(
+            "outcome_time (TKR)",
+            str(outcome) if outcome is not None else "—",
+        )
+        cols[5].metric(
+            "days to TKR",
+            f"{int(d2o)}" if d2o is not None else "—",
+        )
 
     tokens = (
         df.filter(pl.col("subject_id") == selected)
