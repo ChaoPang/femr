@@ -50,7 +50,7 @@ def main(args):
             print("Pruning the ontology")
             ontology.prune_to_dataset(
                 database,
-                prune_all_descriptions=True,
+                prune_all_descriptions=False,
                 remove_ontologies={'SPL', 'HemOnc', 'LOINC'}
             )
 
