@@ -84,10 +84,13 @@ def main() -> None:
     subject_search = st.sidebar.text_input("Search subject_id (exact)", value="")
 
     # ---- apply filters ----
+    _summary_cols = ["subject_id", "prediction_time", "true_label", "predicted_prob", "in_test_set"]
+    for _c in ("outcome_time", "days_to_outcome"):
+        if _c in df.columns:
+            _summary_cols.append(_c)
     summary = (
         df.filter(pl.col("rank") == 1)  # one row per subject
-        .select(["subject_id", "prediction_time", "true_label",
-                 "predicted_prob", "in_test_set"])
+        .select(_summary_cols)
     )
     if only_test:
         summary = summary.filter(pl.col("in_test_set"))
