@@ -23,6 +23,7 @@ class FEMRTransformerConfig(transformers.PretrainedConfig):
         reasoning_weight: float = 1.0,
         reasoning_embedding_init_path: Optional[str] = None,
         reasoning_constrain_to_history: bool = False,
+        reasoning_embedding_freeze: bool = False,
         **kwargs,
     ) -> None:
         """Defined a configuration for a FEMR Transformer.
@@ -80,6 +81,7 @@ class FEMRTransformerConfig(transformers.PretrainedConfig):
         self.reasoning_weight = reasoning_weight
         self.reasoning_embedding_init_path = reasoning_embedding_init_path
         self.reasoning_constrain_to_history = reasoning_constrain_to_history
+        self.reasoning_embedding_freeze = reasoning_embedding_freeze
 
 
 class FEMRTaskConfig(transformers.PretrainedConfig):

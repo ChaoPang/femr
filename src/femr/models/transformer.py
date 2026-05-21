@@ -436,6 +436,8 @@ class FEMRModel(transformers.PreTrainedModel):
                 top_k=self.config.transformer_config.reasoning_top_k,
                 init_embedding=init_embedding,
             )
+            if self.config.transformer_config.reasoning_embedding_freeze:
+                self.reasoning_layer.reasoning_embedding.weight.requires_grad = False
         if self.config.task_config is not None:
             self.task_model = self.create_task_head()
 

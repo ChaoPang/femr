@@ -91,6 +91,13 @@ class MotorArguments:
                     "(multiple patients per batch) via per-position segment IDs."
         },
     )
+    reasoning_embedding_freeze: bool = dataclasses.field(
+        default=False,
+        metadata={
+            "help": "If True, freeze the ReasoningLayer.reasoning_embedding weight "
+                    "(requires_grad=False) so the reasoning tokens are non-trainable."
+        },
+    )
 
 
 def parse_arguments()-> (
@@ -140,6 +147,7 @@ def main():
         reasoning_weight=motor_args.reasoning_weight,
         reasoning_embedding_init_path=motor_args.reasoning_embedding_init_path,
         reasoning_constrain_to_history=motor_args.reasoning_constrain_to_history,
+        reasoning_embedding_freeze=motor_args.reasoning_embedding_freeze,
     )
 
     config = femr.models.config.FEMRModelConfig.from_transformer_task_configs(
