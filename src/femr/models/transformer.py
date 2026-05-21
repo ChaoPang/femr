@@ -850,5 +850,10 @@ def compute_features(
         output["rollout_scores"] = torch.concatenate(all_rollout_scores).numpy()
         output["rollout_timestamps"] = torch.concatenate(all_rollout_timestamps).numpy().astype("datetime64[s]")
         if all_rollout_token_ids:
-            output["rollout_token_ids"] = torch.concatenate(all_rollout_token_ids).numpy()
+            rollout_ids = torch.concatenate(all_rollout_token_ids).numpy()
+            output["rollout_token_ids"] = rollout_ids
+            vocab = tokenizer.dictionary["vocab"]
+            output["rollout_code_strings"] = np.vectorize(
+                lambda i: vocab[int(i)].get("code_string", "") if 0 <= int(i) < len(vocab) else ""
+            )(rollout_ids)
     return output
