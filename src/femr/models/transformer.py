@@ -101,7 +101,7 @@ class FEMREncoderLayer(nn.Module):
             self.config.hidden_size + self.config.intermediate_size, self.config.hidden_size, bias=self.config.use_bias
         )
 
-    def forward(self, x, time_data, pos_embed, attn_bias, s):
+    def forward(self, x, time_data, pos_embed, attn_bias, s, return_attn_weights=False):
         x = self.norm(x)
 
         if self.config.use_normed_ages:
@@ -121,14 +121,16 @@ class FEMREncoderLayer(nn.Module):
         k = apply_rotary_pos_emb(qkv[:, 1, :, :], pos_embed)
         v = qkv[:, 2, :, :]
 
-        attn = femr.models.xformers.memory_efficient_attention_wrapper(
-            q.unsqueeze(0),
-            k.unsqueeze(0),
-            v.unsqueeze(0),
-            attn_bias=attn_bias,
-        )
-
-        attn = attn.reshape(x.shape)
+        layer_attn_weights = None
+        if return_attn_weights:
+            attn_out, layer_attn_weights = femr.models.xformers.attention_with_weights_wrapper(
+                q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_bias=attn_bias,
+            )
+            attn = attn_out.reshape(x.shape)
+        else:
+            attn = femr.models.xformers.memory_efficient_attention_wrapper(
+                q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_bias=attn_bias,
+            ).reshape(x.shape)
 
         if self.config.hidden_act == "gelu":
             ff = F.gelu(ff)
@@ -139,6 +141,8 @@ class FEMREncoderLayer(nn.Module):
         combined = torch.concatenate((attn, ff), axis=-1)
         result = self.output_proj(combined)
 
+        if return_attn_weights:
+            return result, layer_attn_weights
         return result
 
 
@@ -162,7 +166,7 @@ class FEMRTransformer(nn.Module):
 
         self.layers = nn.ModuleList([FEMREncoderLayer(config) for i in range(self.config.n_layers)])
 
-    def forward(self, batch, s):
+    def forward(self, batch, s, return_attn_weights=False):
         if not self.config.is_hierarchical:
             x = self.embed(batch["tokens"])
         else:
@@ -176,11 +180,19 @@ class FEMRTransformer(nn.Module):
             batch["subject_lengths"].tolist()
         ).make_local_attention(self.config.attention_width)
 
+        all_attn_weights = [] if return_attn_weights else None
         for layer in self.layers:
-            x = x + layer(x, time_data, pos_embed, attn_bias, s)
+            if return_attn_weights:
+                delta, layer_weights = layer(x, time_data, pos_embed, attn_bias, s, return_attn_weights=True)
+                all_attn_weights.append(layer_weights)
+            else:
+                delta = layer(x, time_data, pos_embed, attn_bias, s)
+            x = x + delta
 
         final = self.out_norm(x)
 
+        if return_attn_weights:
+            return final, all_attn_weights
         return final
 
 
@@ -410,6 +422,42 @@ class ReasoningLayer(nn.Module):
         return output, top_idx, weights
 
 
+def compute_attention_rollout(
+    all_attn_weights: List[torch.Tensor],
+    label_indices: torch.Tensor,
+    top_k: int = 5,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Attention rollout (Abnar & Zuidema 2020) for a packed sequence.
+
+    For each label position returns the top-k input positions with the highest
+    rollout attribution score.
+
+    Args:
+        all_attn_weights: per-layer attention matrices, each [1, H, N, N].
+        label_indices: positions of label tokens in the packed sequence [L].
+        top_k: number of top input positions to return per label.
+
+    Returns:
+        top_positions [L, top_k], top_scores [L, top_k] — both on CPU.
+    """
+    seq_len = all_attn_weights[0].shape[-1]
+    device = all_attn_weights[0].device
+    eye = torch.eye(seq_len, device=device, dtype=torch.float32)
+
+    # Accumulate rollout layer by layer.
+    # R[i, j] = attribution of input j to position i after all layers.
+    rollout = eye.clone()
+    for attn in all_attn_weights:
+        A = attn[0].mean(dim=0).to(torch.float32)   # [N, N] — average over heads
+        A = 0.5 * A + 0.5 * eye                     # residual connection
+        A = A / A.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        rollout = A @ rollout
+
+    label_rollout = rollout[label_indices.long()]    # [L, N]
+    top_scores, top_positions = label_rollout.topk(top_k, dim=-1)
+    return top_positions.cpu(), top_scores.cpu()
+
+
 class FEMRModel(transformers.PreTrainedModel):
     config_class = femr.models.config.FEMRModelConfig
     # transformers >= 5.x reads this in from_pretrained's missing-key
@@ -580,7 +628,7 @@ class FEMRModel(transformers.PreTrainedModel):
         else:
             raise RuntimeError("Could not determine head for task " + task_type)
 
-    def forward(self, batch: Mapping[str, Any], return_loss=True, return_logits=False, return_reprs=False):
+    def forward(self, batch: Mapping[str, Any], return_loss=True, return_logits=False, return_reprs=False, return_rollout=False, rollout_top_k=5):
         # Need a return_loss parameter for transformers.Trainer to work properly
         assert return_loss
 
@@ -590,7 +638,10 @@ class FEMRModel(transformers.PreTrainedModel):
         s[1:] = batch['subject_ids'][1:] != batch['subject_ids'][:-1]
         s = torch.cumsum(s, dim=0).type(torch.uint8)
 
-        features = self.transformer(batch["transformer"], s)
+        if return_rollout:
+            features, all_attn_weights = self.transformer(batch["transformer"], s, return_attn_weights=True)
+        else:
+            features = self.transformer(batch["transformer"], s)
         if "task" in batch and self.config.task_config is not None:
             features = features.reshape(-1, features.shape[-1])
             features = features[batch["transformer"]["label_indices"], :]
@@ -612,6 +663,22 @@ class FEMRModel(transformers.PreTrainedModel):
             if return_logits or return_reprs:
                 result["timestamps"] = batch["transformer"]["timestamps"][batch["transformer"]["label_indices"]]
                 result["subject_ids"] = batch["subject_ids"][batch["transformer"]["label_indices"]]
+            if return_rollout:
+                label_indices = batch["transformer"]["label_indices"]
+                rollout_positions, rollout_scores = compute_attention_rollout(
+                    all_attn_weights, label_indices, top_k=rollout_top_k
+                )
+                result["rollout_positions"] = rollout_positions          # [L, top_k] batch-local
+                result["rollout_scores"] = rollout_scores                # [L, top_k]
+                result["rollout_timestamps"] = (
+                    batch["transformer"]["timestamps"][rollout_positions]
+                    .cpu()
+                )                                                        # [L, top_k]
+                if not self.config.transformer_config.is_hierarchical:
+                    result["rollout_token_ids"] = (
+                        batch["transformer"]["tokens"][rollout_positions]
+                        .cpu()
+                    )                                                    # [L, top_k]
             return loss, result
         else:
             loss = 0
@@ -655,7 +722,9 @@ def compute_features(
         device: Optional[torch.device] = None,
         ontology: Optional[femr.ontology.Ontology] = None,
         observation_window: Optional[int] = None,
-        total_flops: TotalFlops = None
+        total_flops: TotalFlops = None,
+        return_rollout: bool = False,
+        rollout_top_k: int = 5,
 ) -> Dict[str, np.ndarray]:
     """ "Compute features for a set of labels given a dataset and a model.
 
@@ -701,6 +770,9 @@ def compute_features(
     all_representations = []
     all_reasoning_token_ids = []
     all_reasoning_weights = []
+    all_rollout_scores = []
+    all_rollout_timestamps = []
+    all_rollout_token_ids = []
 
     with torch.no_grad():
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -713,14 +785,14 @@ def compute_features(
                             activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                             with_flops=True,
                     ) as prof:
-                        _, result = model(**batch, return_reprs=True)
+                        _, result = model(**batch, return_reprs=True, return_rollout=return_rollout, rollout_top_k=rollout_top_k)
 
                     for event in prof.key_averages():
                         if hasattr(event, "flops") and event.flops > 0:
                             # Convert to GFLOPs
                             total_flops.total_flops += event.flops / 1e9
                 else:
-                    _, result = model(**batch, return_reprs=True)
+                    _, result = model(**batch, return_reprs=True, return_rollout=return_rollout, rollout_top_k=rollout_top_k)
 
                 all_subject_ids.append(result["subject_ids"].to(cpu_device, non_blocking=True))
                 all_feature_times.append(result["timestamps"].to(cpu_device, non_blocking=True))
@@ -728,6 +800,11 @@ def compute_features(
                 if "reasoning_token_ids" in result:
                     all_reasoning_token_ids.append(result["reasoning_token_ids"].to(cpu_device, non_blocking=True))
                     all_reasoning_weights.append(result["reasoning_weights"].to(cpu_device, non_blocking=True))
+                if "rollout_scores" in result:
+                    all_rollout_scores.append(result["rollout_scores"])
+                    all_rollout_timestamps.append(result["rollout_timestamps"])
+                    if "rollout_token_ids" in result:
+                        all_rollout_token_ids.append(result["rollout_token_ids"])
 
     torch.cuda.synchronize()
 
@@ -743,4 +820,9 @@ def compute_features(
     if all_reasoning_token_ids:
         output["reasoning_token_ids"] = torch.concatenate(all_reasoning_token_ids).numpy()
         output["reasoning_weights"] = torch.concatenate(all_reasoning_weights).numpy()
+    if all_rollout_scores:
+        output["rollout_scores"] = torch.concatenate(all_rollout_scores).numpy()
+        output["rollout_timestamps"] = torch.concatenate(all_rollout_timestamps).numpy().astype("datetime64[s]")
+        if all_rollout_token_ids:
+            output["rollout_token_ids"] = torch.concatenate(all_rollout_token_ids).numpy()
     return output

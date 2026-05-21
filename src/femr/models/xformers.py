@@ -55,3 +55,36 @@ def memory_efficient_attention_wrapper(q, k, v, attn_bias):
         return ref_attention_bmhk(q, k, v, attn_bias)
     else:
         return xformers.ops.memory_efficient_attention(q, k, v, attn_bias)
+
+
+def attention_with_weights_wrapper(q, k, v, attn_bias):
+    """Compute attention and return (output [B,Mq,H,K], weights [B,H,Mq,Mk]).
+
+    Always materializes the full attention matrix, so use only at inference
+    time when you need the weights (e.g. for attention rollout).
+    """
+    assert q.ndim == 4  # BMHK
+    B, Mq, H, K = q.shape
+    Mk = k.shape[1]
+
+    def T(t):
+        return t.permute((0, 2, 1, 3)).reshape([t.shape[0] * t.shape[2], t.shape[1], t.shape[3]])
+
+    if isinstance(attn_bias, xformers.ops.AttentionBias):
+        attn_bias_mat = attn_bias.materialize(
+            (B, H, Mq, Mk), device=q.device, dtype=torch.float32
+        ).reshape([B * H, Mq, Mk])
+    else:
+        attn_bias_mat = attn_bias
+
+    q_f, k_f, v_f = T(q).float(), T(k).float(), T(v).float()
+    scale = 1.0 / q_f.shape[-1] ** 0.5
+    scores = (q_f * scale) @ k_f.transpose(-2, -1)   # [B*H, Mq, Mk]
+    if attn_bias_mat is not None:
+        scores = scores + attn_bias_mat.float()
+    weights = scores.softmax(-1)                       # [B*H, Mq, Mk]
+    out = (weights @ v_f).to(q.dtype)                 # [B*H, Mq, K]
+
+    out = out.reshape([B, H, Mq, K]).permute((0, 2, 1, 3))   # [B, Mq, H, K]
+    weights = weights.reshape([B, H, Mq, Mk])                 # [B, H, Mq, Mk]
+    return out, weights
