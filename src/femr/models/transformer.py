@@ -425,37 +425,61 @@ class ReasoningLayer(nn.Module):
 def compute_attention_rollout(
     all_attn_weights: List[torch.Tensor],
     label_indices: torch.Tensor,
+    subject_lengths: torch.Tensor,
     top_k: int = 5,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Attention rollout (Abnar & Zuidema 2020) for a packed sequence.
+    """Attention rollout (Abnar & Zuidema 2020) computed per patient segment.
 
-    For each label position returns the top-k input positions with the highest
-    rollout attribution score.
+    The packed batch may contain multiple patients. Rollout is computed
+    independently for each segment so that attribution never crosses patient
+    boundaries and the identity matrix is sized to each patient's sequence.
 
     Args:
         all_attn_weights: per-layer attention matrices, each [1, H, N, N].
         label_indices: positions of label tokens in the packed sequence [L].
+        subject_lengths: length of each patient segment in the packed sequence.
         top_k: number of top input positions to return per label.
 
     Returns:
-        top_positions [L, top_k], top_scores [L, top_k] — both on CPU.
+        top_positions [L, top_k], top_scores [L, top_k] — global positions, on CPU.
     """
-    seq_len = all_attn_weights[0].shape[-1]
     device = all_attn_weights[0].device
-    eye = torch.eye(seq_len, device=device, dtype=torch.float32)
+    n_labels = label_indices.shape[0]
+    label_pos = label_indices.long()
 
-    # Accumulate rollout layer by layer.
-    # R[i, j] = attribution of input j to position i after all layers.
-    rollout = eye.clone()
-    for attn in all_attn_weights:
-        A = attn[0].mean(dim=0).to(torch.float32)   # [N, N] — average over heads
-        A = 0.5 * A + 0.5 * eye                     # residual connection
-        A = A / A.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-        rollout = A @ rollout
+    top_positions = torch.zeros(n_labels, top_k, dtype=torch.long)
+    top_scores = torch.zeros(n_labels, top_k, dtype=torch.float32)
 
-    label_rollout = rollout[label_indices.long()]    # [L, N]
-    top_scores, top_positions = label_rollout.topk(top_k, dim=-1)
-    return top_positions.cpu(), top_scores.cpu()
+    seg_start = 0
+    for seg_len in subject_lengths.tolist():
+        seg_end = seg_start + seg_len
+
+        seg_mask = (label_pos >= seg_start) & (label_pos < seg_end)
+        seg_label_global = label_pos[seg_mask]
+
+        if seg_label_global.numel() > 0:
+            eye = torch.eye(seg_len, device=device, dtype=torch.float32)
+            rollout = eye.clone()
+            for attn in all_attn_weights:
+                A = attn[0, :, seg_start:seg_end, seg_start:seg_end].mean(dim=0).float()
+                A = 0.5 * A + 0.5 * eye
+                A = A / A.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+                rollout = A @ rollout
+
+            local_idx = seg_label_global - seg_start
+            label_rollout = rollout[local_idx]             # [n_seg_labels, seg_len]
+
+            k = min(top_k, seg_len)
+            scores_k, pos_k = label_rollout.topk(k, dim=-1)
+            pos_k = pos_k + seg_start                      # convert to global positions
+
+            out_idx = torch.where(seg_mask)[0]
+            top_positions[out_idx, :k] = pos_k.cpu()
+            top_scores[out_idx, :k] = scores_k.cpu()
+
+        seg_start = seg_end
+
+    return top_positions, top_scores
 
 
 class FEMRModel(transformers.PreTrainedModel):
@@ -666,7 +690,9 @@ class FEMRModel(transformers.PreTrainedModel):
             if return_rollout:
                 label_indices = batch["transformer"]["label_indices"]
                 rollout_positions, rollout_scores = compute_attention_rollout(
-                    all_attn_weights, label_indices, top_k=rollout_top_k
+                    all_attn_weights, label_indices,
+                    batch["transformer"]["subject_lengths"],
+                    top_k=rollout_top_k,
                 )
                 result["rollout_positions"] = rollout_positions          # [L, top_k] batch-local
                 result["rollout_scores"] = rollout_scores                # [L, top_k]
