@@ -173,10 +173,14 @@ class BatchCreator:
                 per_subject_hierarchical_tokens.extend(features)
                 per_subject_hierarchical_weights.extend(weights)
 
+        # Position 0 is the static/demographics bundle; anchor its age/timestamp
+        # to birth so the rotary pos embedding doesn't encode a future signal.
+        # Previously this used the loop variable `event.time`, which leaked the
+        # patient's most recent clinical event into pos 0.
         per_subject_token_indices.append(len(per_subject_hierarchical_tokens))
-        per_subject_ages.append((event.time - birth) / datetime.timedelta(days=1))
+        per_subject_ages.append((birth - birth) / datetime.timedelta(days=1))
         per_subject_time_data.append([1, 0, 0, 0, 0])
-        per_subject_timestamps.append(event.time.replace(tzinfo=datetime.timezone.utc).timestamp())
+        per_subject_timestamps.append(birth.replace(tzinfo=datetime.timezone.utc).timestamp())
                 
         for event in subject.events:
             if event.time is None or (

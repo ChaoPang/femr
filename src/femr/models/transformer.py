@@ -475,7 +475,7 @@ def compute_attention_rollout(
 
             out_idx = torch.where(seg_mask)[0]
             top_positions[out_idx, :k] = pos_k.cpu()
-            top_scores[out_idx, :k] = scores_k.cpu()
+            top_scores[out_idx, :k] = scores_k.float().cpu()
 
         seg_start = seg_end
 
