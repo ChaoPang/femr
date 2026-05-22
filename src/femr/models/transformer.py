@@ -705,6 +705,20 @@ class FEMRModel(transformers.PreTrainedModel):
                         batch["transformer"]["tokens"][rollout_positions]
                         .cpu()
                     )                                                    # [L, top_k]
+                else:
+                    # Hierarchical: each position is a bag of tokens (variable length),
+                    # so emit a list-of-lists keyed by label and rank.
+                    ht_cpu = batch["transformer"]["hierarchical_tokens"].cpu().numpy()
+                    ti_cpu = batch["transformer"]["token_indices"].cpu().numpy()
+                    rp_cpu = rollout_positions.cpu().numpy()
+                    L, K = rp_cpu.shape
+                    result["rollout_hierarchical_token_bags"] = [
+                        [
+                            ht_cpu[ti_cpu[int(rp_cpu[l, k])]:ti_cpu[int(rp_cpu[l, k]) + 1]].tolist()
+                            for k in range(K)
+                        ]
+                        for l in range(L)
+                    ]                                                    # list[L][top_k] of token-id lists
             return loss, result
         else:
             loss = 0
@@ -799,6 +813,7 @@ def compute_features(
     all_rollout_scores = []
     all_rollout_timestamps = []
     all_rollout_token_ids = []
+    all_rollout_hierarchical_bags: list = []
 
     with torch.no_grad():
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -831,6 +846,8 @@ def compute_features(
                     all_rollout_timestamps.append(result["rollout_timestamps"])
                     if "rollout_token_ids" in result:
                         all_rollout_token_ids.append(result["rollout_token_ids"])
+                    if "rollout_hierarchical_token_bags" in result:
+                        all_rollout_hierarchical_bags.extend(result["rollout_hierarchical_token_bags"])
 
     torch.cuda.synchronize()
 
@@ -856,4 +873,14 @@ def compute_features(
             output["rollout_code_strings"] = np.vectorize(
                 lambda i: vocab[int(i)].get("code_string", "") if 0 <= int(i) < len(vocab) else ""
             )(rollout_ids)
+        if all_rollout_hierarchical_bags:
+            # list[L][top_k] of token-id lists; also store decoded code-string lists.
+            output["rollout_hierarchical_token_bags"] = all_rollout_hierarchical_bags
+            vocab = tokenizer.dictionary["vocab"]
+            def _decode(tid: int) -> str:
+                return vocab[tid].get("code_string", "") if 0 <= tid < len(vocab) else ""
+            output["rollout_hierarchical_code_strings"] = [
+                [[_decode(int(t)) for t in bag] for bag in label_bags]
+                for label_bags in all_rollout_hierarchical_bags
+            ]
     return output
