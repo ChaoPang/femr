@@ -3,7 +3,7 @@
 # Default values
 SCRIPT_NAME=$(basename "$0")
 NUM_PROC=10
-TOKENS_PER_BATCH=231072
+TOKENS_PER_BATCH=16384
 # Use empty value to indicate no observation window specified
 OBSERVATION_WINDOW=""
 
@@ -21,7 +21,7 @@ show_help() {
     echo "  --pretraining_data       Override PRETRAINING_DATA environment variable"
     echo "  --meds_reader            Override OMOP_MEDS_READER environment variable"
     echo "  --num_proc               Number of processors to use (default: 10)"
-    echo "  --tokens_per_batch       Tokens per batch (default: 231072)"
+    echo "  --tokens_per_batch       Tokens per batch (default: 16384)"
     echo "  --observation_window     Observation window in days (optional integer value)"
     echo
     echo "Environment Variables:"

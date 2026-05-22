@@ -166,7 +166,16 @@ class FEMRTransformer(nn.Module):
 
         self.layers = nn.ModuleList([FEMREncoderLayer(config) for i in range(self.config.n_layers)])
 
-    def forward(self, batch, s, return_attn_weights=False):
+    def forward(
+        self,
+        batch,
+        s,
+        *,
+        return_attn_weights=False,
+        rollout_label_indices=None,
+        rollout_subject_lengths=None,
+        rollout_top_k=50,
+    ):
         if not self.config.is_hierarchical:
             x = self.embed(batch["tokens"])
         else:
@@ -180,16 +189,74 @@ class FEMRTransformer(nn.Module):
             batch["subject_lengths"].tolist()
         ).make_local_attention(self.config.attention_width)
 
-        all_attn_weights = [] if return_attn_weights else None
+        # When rollout indices are supplied, fold attention rollout into the
+        # per-layer loop so we never need to retain a [B*H, Mq, Mk] weights
+        # tensor across layers. Per-segment running rollouts stay on GPU and
+        # are typically a few MB total (Σ seg_len² fp32 elements).
+        do_inline_rollout = rollout_label_indices is not None
+        if do_inline_rollout:
+            seg_lens = rollout_subject_lengths.tolist()
+            seg_starts = []
+            _acc = 0
+            for sl in seg_lens:
+                seg_starts.append(_acc)
+                _acc += sl
+            eyes = [
+                torch.eye(sl, device=x.device, dtype=torch.float32)
+                for sl in seg_lens
+            ]
+            rollouts = [e.clone() for e in eyes]
+
+        # Legacy CPU-offload path for callers that still want raw per-layer weights.
+        all_attn_weights = [] if (return_attn_weights and not do_inline_rollout) else None
+        need_weights = do_inline_rollout or return_attn_weights
+
         for layer in self.layers:
-            if return_attn_weights:
+            if need_weights:
                 delta, layer_weights = layer(x, time_data, pos_embed, attn_bias, s, return_attn_weights=True)
-                all_attn_weights.append(layer_weights)
+                if do_inline_rollout:
+                    for i, (seg_start, seg_len) in enumerate(zip(seg_starts, seg_lens)):
+                        seg_end = seg_start + seg_len
+                        A = (
+                            layer_weights[0, :, seg_start:seg_end, seg_start:seg_end]
+                            .mean(dim=0)
+                            .float()
+                        )
+                        A = 0.5 * A + 0.5 * eyes[i]
+                        A = A / A.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+                        rollouts[i] = A @ rollouts[i]
+                    del layer_weights
+                else:
+                    # Same CPU-offload behavior as before so the legacy path
+                    # (return_attn_weights=True without rollout params) stays
+                    # within VRAM for deep stacks.
+                    all_attn_weights.append(layer_weights.cpu())
+                    del layer_weights
             else:
                 delta = layer(x, time_data, pos_embed, attn_bias, s)
             x = x + delta
 
         final = self.out_norm(x)
+
+        if do_inline_rollout:
+            label_pos = rollout_label_indices.long().to(x.device)
+            n_labels = label_pos.shape[0]
+            top_positions = torch.zeros(n_labels, rollout_top_k, dtype=torch.long)
+            top_scores = torch.zeros(n_labels, rollout_top_k, dtype=torch.float32)
+            for i, (seg_start, seg_len) in enumerate(zip(seg_starts, seg_lens)):
+                seg_end = seg_start + seg_len
+                seg_mask = (label_pos >= seg_start) & (label_pos < seg_end)
+                if not seg_mask.any():
+                    continue
+                local_idx = label_pos[seg_mask] - seg_start
+                label_rollout = rollouts[i][local_idx]
+                k = min(rollout_top_k, seg_len)
+                scores_k, pos_k = label_rollout.topk(k, dim=-1)
+                pos_k = pos_k + seg_start
+                out_idx = torch.where(seg_mask)[0]
+                top_positions[out_idx, :k] = pos_k.cpu()
+                top_scores[out_idx, :k] = scores_k.float().cpu()
+            return final, top_positions, top_scores
 
         if return_attn_weights:
             return final, all_attn_weights
@@ -445,7 +512,10 @@ def compute_attention_rollout(
     """
     device = all_attn_weights[0].device
     n_labels = label_indices.shape[0]
-    label_pos = label_indices.long()
+    # Run rollout on whichever device the attention weights live on; the label
+    # indices follow so per-segment slicing/indexing stays consistent.
+    # (subject_lengths is iterated via .tolist(); no device move needed.)
+    label_pos = label_indices.long().to(device)
 
     top_positions = torch.zeros(n_labels, top_k, dtype=torch.long)
     top_scores = torch.zeros(n_labels, top_k, dtype=torch.float32)
@@ -663,7 +733,13 @@ class FEMRModel(transformers.PreTrainedModel):
         s = torch.cumsum(s, dim=0).type(torch.uint8)
 
         if return_rollout:
-            features, all_attn_weights = self.transformer(batch["transformer"], s, return_attn_weights=True)
+            features, rollout_positions, rollout_scores = self.transformer(
+                batch["transformer"],
+                s,
+                rollout_label_indices=batch["transformer"]["label_indices"],
+                rollout_subject_lengths=batch["transformer"]["subject_lengths"],
+                rollout_top_k=rollout_top_k,
+            )
         else:
             features = self.transformer(batch["transformer"], s)
         if "task" in batch and self.config.task_config is not None:
@@ -688,12 +764,8 @@ class FEMRModel(transformers.PreTrainedModel):
                 result["timestamps"] = batch["transformer"]["timestamps"][batch["transformer"]["label_indices"]]
                 result["subject_ids"] = batch["subject_ids"][batch["transformer"]["label_indices"]]
             if return_rollout:
-                label_indices = batch["transformer"]["label_indices"]
-                rollout_positions, rollout_scores = compute_attention_rollout(
-                    all_attn_weights, label_indices,
-                    batch["transformer"]["subject_lengths"],
-                    top_k=rollout_top_k,
-                )
+                # rollout_positions / rollout_scores were produced inline by
+                # the transformer forward; no post-hoc weights aggregation.
                 result["rollout_positions"] = rollout_positions          # [L, top_k] batch-local
                 result["rollout_scores"] = rollout_scores                # [L, top_k]
                 result["rollout_timestamps"] = (
