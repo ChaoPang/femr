@@ -7,7 +7,6 @@ from typing import Optional
 import femr.transforms
 import meds_reader
 import femr.models.transformer
-import femr.splits
 import pandas as pd
 import pickle
 import meds
@@ -43,13 +42,6 @@ def create_arg_parser():
         type=int,
         default=None,
         help="The observation window for extracting features",
-    )
-    args.add_argument(
-        "--rollout_top_k",
-        dest="rollout_top_k",
-        type=int,
-        default=5,
-        help="Number of top input positions to return per label in the attention rollout (test set only)",
     )
     return args
 
@@ -138,31 +130,6 @@ def main():
             )
             with open(feature_output_path, 'wb') as f:
                 pickle.dump(features, f)
-
-            # Second pass: attention rollout for test-set labels only
-            rollout_output_path = features_path / f"{motor_features_name}_rollout.pkl"
-            split_path = pretraining_data / 'main_split.csv'
-            if not rollout_output_path.exists() and split_path.exists():
-                main_split = femr.splits.SubjectSplit.load_from_csv(str(split_path))
-                test_subject_ids = set(main_split.test_subject_ids)
-                test_labels = [l for l in typed_labels if l["subject_id"] in test_subject_ids]
-                if test_labels:
-                    print(f"Computing attention rollout for {len(test_labels)} test-set labels (top_k={args.rollout_top_k})")
-                    rollout_features = femr.models.transformer.compute_features(
-                        db=database,
-                        model_path=str(pretraining_data / "motor_model"),
-                        labels=test_labels,
-                        ontology=ontology,
-                        device=torch.device('cuda'),
-                        tokens_per_batch=args.tokens_per_batch,
-                        num_proc=args.num_proc,
-                        observation_window=args.observation_window,
-                        return_rollout=True,
-                        rollout_top_k=args.rollout_top_k,
-                    )
-                    with open(rollout_output_path, 'wb') as f:
-                        pickle.dump(rollout_features, f)
-                    print(f"Rollout features saved to {rollout_output_path}")
 
             # Save the training metrics to the output file
             with open(training_metrics_file, "w") as output_file:

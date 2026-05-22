@@ -652,7 +652,7 @@ class FEMRModel(transformers.PreTrainedModel):
         else:
             raise RuntimeError("Could not determine head for task " + task_type)
 
-    def forward(self, batch: Mapping[str, Any], return_loss=True, return_logits=False, return_reprs=False, return_rollout=False, rollout_top_k=5):
+    def forward(self, batch: Mapping[str, Any], return_loss=True, return_logits=False, return_reprs=False, return_rollout=False, rollout_top_k=50):
         # Need a return_loss parameter for transformers.Trainer to work properly
         assert return_loss
 
@@ -764,7 +764,7 @@ def compute_features(
         observation_window: Optional[int] = None,
         total_flops: TotalFlops = None,
         return_rollout: bool = False,
-        rollout_top_k: int = 5,
+        rollout_top_k: int = 50,
 ) -> Dict[str, np.ndarray]:
     """ "Compute features for a set of labels given a dataset and a model.
 
