@@ -98,6 +98,21 @@ class MotorArguments:
                     "(requires_grad=False) so the reasoning tokens are non-trainable."
         },
     )
+    early_stopping_patience: int = dataclasses.field(
+        default=1,
+        metadata={
+            "help": "Stop training after this many consecutive evaluations without a "
+                    "qualifying improvement in eval_loss."
+        },
+    )
+    early_stopping_threshold: float = dataclasses.field(
+        default=0.001,
+        metadata={
+            "help": "Minimum *relative* improvement (|new - best| / best) required to "
+                    "count as an improvement for early stopping. Set to 0.0 to count any "
+                    "absolute improvement, no matter how small."
+        },
+    )
 
 
 def parse_arguments()-> (
@@ -199,7 +214,10 @@ def main():
         train_dataset=train_batches,
         eval_dataset=val_batches,
         args=training_args,
-        callbacks=[CustomEarlyStoppingCallback(early_stopping_patience=1, early_stopping_threshold=0.001)],
+        callbacks=[CustomEarlyStoppingCallback(
+            early_stopping_patience=motor_args.early_stopping_patience,
+            early_stopping_threshold=motor_args.early_stopping_threshold,
+        )],
     )
     train_result = trainer.train(resume_from_checkpoint=motor_args.checkpoint_dir)
     trainer.log_metrics("train", train_result.metrics)
