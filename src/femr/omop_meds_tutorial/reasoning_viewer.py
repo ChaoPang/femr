@@ -1,20 +1,29 @@
-"""Streamlit viewer for MOTOR-reasoning attributions.
+"""Streamlit viewer for MOTOR attribution parquets.
+
+Supports two attribution modes, auto-detected from the parquet schema:
+  * **reasoning** — produced by ``extract_reasoning_predictions`` from a
+    reasoning-MOTOR ``<label>_motor.pkl``. Per-subject rows have
+    ``token_id, weight, code_string, description``.
+  * **rollout** — produced by ``extract_attention_rollout`` from a
+    ``<label>_motor_rollout.pkl``. Per-subject rows have
+    ``weight (=score), code_string (=leaf), days_before, attended_time, bag_codes``.
 
 Shows per-prediction:
-  1. subject_id
-  2. ground-truth label
-  3. MOTOR+reasoning predicted probability
-  4. reasoning tokens sorted by weight (descending), with vocab + description
+  1. subject_id, ground-truth label, predicted probability, prediction time
+  2. (optional) outcome time + days to outcome
+  3. Top-K attributions sorted by weight (descending), with code + description
+  4. For rollout mode: ``days_before`` column and an expandable hierarchical bag.
 
 Usage:
 
     pip install "femr[viz]"          # or just: pip install streamlit altair
     streamlit run \\
         $(python -c "import femr.omop_meds_tutorial.reasoning_viewer as m; print(m.__file__)") \\
-        -- --parquet /path/to/reasoning_predictions_long.parquet
+        -- --parquet /path/to/(reasoning_predictions|attention_rollout)_long.parquet
 
-The expected parquet is the long-format extract produced by
-``python -m femr.omop_meds_tutorial.extract_reasoning_predictions``.
+The expected parquet is the long-format extract produced by either
+``femr.omop_meds_tutorial.extract_reasoning_predictions`` or
+``femr.omop_meds_tutorial.extract_attention_rollout``.
 """
 from __future__ import annotations
 
@@ -46,20 +55,24 @@ def load(parquet_path: str) -> pl.DataFrame:
 
 
 def main() -> None:
-    st.set_page_config(page_title="MOTOR reasoning viewer", layout="wide")
+    st.set_page_config(page_title="MOTOR attribution viewer", layout="wide")
     parquet_path = _cli_args()
     if not parquet_path.exists():
         st.error(f"parquet not found: {parquet_path}")
         st.stop()
 
     df = load(str(parquet_path))
+    # Auto-detect attribution mode from the parquet columns.
+    rollout_mode = "days_before" in df.columns and "bag_codes" in df.columns
+    mode_label = "attention rollout" if rollout_mode else "reasoning layer"
     n_subjects = df.select(pl.col("subject_id").n_unique()).item()
     n_test = df.filter(pl.col("in_test_set"))["subject_id"].n_unique()
-    st.title("MOTOR reasoning-layer viewer")
+    st.title(f"MOTOR {mode_label} viewer")
+    units = "attended positions" if rollout_mode else "reasoning tokens"
     st.caption(
-        f"source: `{parquet_path.name}`  ·  {n_subjects:,} subjects "
-        f"({n_test:,} in held-out test set)  ·  "
-        f"top-{df['rank'].max()} reasoning tokens per subject"
+        f"source: `{parquet_path.name}`  ·  mode: **{mode_label}**  ·  "
+        f"{n_subjects:,} subjects ({n_test:,} in held-out test set)  ·  "
+        f"top-{df['rank'].max()} {units} per subject"
     )
 
     # ---- sidebar filters ----
@@ -191,44 +204,73 @@ def main() -> None:
             (pl.col("weight").cum_sum().over(pl.lit(1))).alias("cumulative")
         )
     )
-    st.markdown(f"**Reasoning tokens** (top-{tokens.height}, sorted by weight descending):")
-    st.dataframe(
-        tokens.select([
+
+    if rollout_mode:
+        # Optional: format the hierarchical bag as a comma-joined string for display
+        tokens = tokens.with_columns(
+            pl.col("bag_codes").list.join(", ").alias("bag")
+        )
+        table_cols = [
+            "rank", "weight", "cumulative", "days_before",
+            "code_string", "description", "bag",
+        ]
+        weight_label = "attention rollout score"
+        units_label = "attended positions"
+    else:
+        table_cols = [
             "rank", "weight", "cumulative", "token_id",
             "code_string", "description",
-        ]),
+        ]
+        weight_label = "reasoning weight"
+        units_label = "reasoning tokens"
+
+    st.markdown(
+        f"**Top-{tokens.height} {units_label}** (sorted by weight descending):"
+    )
+    column_config = {
+        "rank":        st.column_config.NumberColumn(format="%d"),
+        "weight":      st.column_config.NumberColumn(format="%.4f"),
+        "cumulative":  st.column_config.NumberColumn(format="%.4f"),
+    }
+    if rollout_mode:
+        column_config["days_before"] = st.column_config.NumberColumn(format="%d")
+    else:
+        column_config["token_id"] = st.column_config.NumberColumn(format="%d")
+
+    st.dataframe(
+        tokens.select(table_cols),
         use_container_width=True,
         height=500,
-        column_config={
-            "rank":        st.column_config.NumberColumn(format="%d"),
-            "weight":      st.column_config.NumberColumn(format="%.4f"),
-            "cumulative":  st.column_config.NumberColumn(format="%.4f"),
-            "token_id":    st.column_config.NumberColumn(format="%d"),
-        },
+        column_config=column_config,
     )
 
     # Bar chart of weights
+    chart_tooltips = [
+        alt.Tooltip("rank:O"),
+        alt.Tooltip("weight:Q", format=".4f"),
+        alt.Tooltip("code_string:N"),
+        alt.Tooltip("description:N"),
+    ]
+    if rollout_mode:
+        chart_tooltips.insert(2, alt.Tooltip("days_before:Q", title="days before prediction"))
+    else:
+        chart_tooltips.insert(2, alt.Tooltip("token_id:N"))
+
     chart = (
         alt.Chart(tokens.head(32).to_pandas())
         .mark_bar()
         .encode(
-            x=alt.X("weight:Q", title="reasoning weight"),
+            x=alt.X("weight:Q", title=weight_label),
             y=alt.Y(
                 "rank:O",
                 sort=alt.SortField("rank", order="ascending"),
                 title="rank",
             ),
-            tooltip=[
-                alt.Tooltip("rank:O"),
-                alt.Tooltip("weight:Q", format=".4f"),
-                alt.Tooltip("token_id:N"),
-                alt.Tooltip("code_string:N"),
-                alt.Tooltip("description:N"),
-            ],
+            tooltip=chart_tooltips,
         )
         .properties(
             height=20 * min(32, tokens.height),
-            title=f"Reasoning-token weights for subject {selected}",
+            title=f"{weight_label.capitalize()} for subject {selected}",
         )
     )
     st.altair_chart(chart, use_container_width=True)
