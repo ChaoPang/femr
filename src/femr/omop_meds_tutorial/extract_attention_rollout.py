@@ -16,22 +16,25 @@ Subjects not in the held-out test split get predicted_prob = NULL. Subjects who
 never had a qualifying TKR get outcome_time = NULL.
 
 Output schema (long format, one row per (subject, rank)):
-  subject_id           int64
-  prediction_time      datetime[us]
-  true_label           bool
-  predicted_prob       float32 (nullable)
-  in_test_set          bool
-  outcome_time         datetime[us] (nullable) — first TKR after prediction_time+washout
-  days_to_outcome      int32 (nullable)        — (outcome_time - prediction_time).days
-  rank                 int32                   # 1..top_k, sorted by score desc
-  weight               float32                 # rollout score (alias for compatibility
-                                               #   with the reasoning extractor's `weight`)
-  code_string          string                  # leaf code at the attended position
-  description          string                  # concept description for the leaf code
-  days_before          int32                   # (prediction_time - attended_time).days
-  attended_time        datetime[us]            # timestamp of the attended position
-  bag_codes            list[string]            # full hierarchical bag at the position
-                                               #   (leaf first, then ancestors)
+  subject_id            int64
+  prediction_time       datetime[us]
+  true_label            bool
+  predicted_prob        float32 (nullable)
+  in_test_set           bool
+  outcome_time          datetime[us] (nullable) — first TKR after prediction_time+washout
+  days_to_outcome       int32 (nullable)        — (outcome_time - prediction_time).days
+  n_events_before_pred  int32 (nullable)        — # of timed events at or before
+                                                  prediction_time (from meds_reader);
+                                                  null if --meds_reader not supplied
+  rank                  int32                   # 1..top_k, sorted by score desc
+  weight                float32                 # rollout score (alias for compatibility
+                                                #   with the reasoning extractor's `weight`)
+  code_string           string                  # leaf code at the attended position
+  description           string                  # concept description for the leaf code
+  days_before           int32                   # (prediction_time - attended_time).days
+  attended_time         datetime[us]            # timestamp of the attended position
+  bag_codes             list[string]            # full hierarchical bag at the position
+                                                #   (leaf first, then ancestors)
 """
 from __future__ import annotations
 
@@ -47,25 +50,40 @@ import pandas as pd
 import polars as pl
 
 
-def _outcome_time_worker(
-    subjects, *, tkr_codes: set, koa_codes: set, washout: _datetime.timedelta,
+def _subject_stats_worker(
+    subjects,
+    *,
+    tkr_codes: set,
+    koa_codes: set,
+    washout: _datetime.timedelta,
+    pred_time_lookup: dict,
 ):
-    """Mirrors TKRSinceKOALabeler outcome detection (see extract_reasoning_predictions)."""
+    """For each subject return (subject_id, outcome_time, n_events_before_pred).
+
+    Outcome detection mirrors TKRSinceKOALabeler (see extract_reasoning_predictions).
+    n_events_before_pred is the count of timed events at or before the subject's
+    prediction_time (looked up from ``pred_time_lookup``); None if the subject
+    isn't in the lookup.
+    """
     out = []
     for s in subjects:
+        sid = int(s.subject_id)
+        pred_t = pred_time_lookup.get(sid)
         first_koa = None
         outcome = None
+        n_pre = 0
         for e in s.events:
             if e.time is None:
                 continue
+            if pred_t is not None and e.time <= pred_t:
+                n_pre += 1
             if first_koa is None:
                 if e.code in koa_codes:
                     first_koa = e.time
                 continue
-            if e.code in tkr_codes and e.time > first_koa + washout:
+            if outcome is None and e.code in tkr_codes and e.time > first_koa + washout:
                 outcome = e.time
-                break
-        out.append((int(s.subject_id), outcome))
+        out.append((sid, outcome, n_pre if pred_t is not None else None))
     return out
 
 
@@ -153,28 +171,42 @@ def main() -> None:
         except Exception:
             return ""
 
-    # Optional outcome times
+    # Optional outcome times + per-subject pre-prediction event counts
     outcome_lookup: dict[int, _datetime.datetime] = {}
+    n_pre_lookup: dict[int, int] = {}
     if args.meds_reader:
         import meds_reader
         from femr.labelers.koa_tkr import KOA_CODES, TKR_CODES
         washout = _datetime.timedelta(days=args.tkr_washout_days)
         labeled_ids = set(int(s) for s in sids.tolist())
-        print(f"scanning {args.meds_reader} for outcome_time on {len(labeled_ids):,} labeled subjects ...")
+        # Per-subject prediction_time lookup so the worker can count events
+        # at or before each subject's own prediction_time.
+        pred_time_lookup = {
+            int(s): pd.Timestamp(t).to_pydatetime()
+            for s, t in zip(sids, fts)
+        }
+        print(f"scanning {args.meds_reader} for outcome_time + n_events_before_pred "
+              f"on {len(labeled_ids):,} labeled subjects ...")
         t0 = time.time()
         worker = functools.partial(
-            _outcome_time_worker,
+            _subject_stats_worker,
             tkr_codes=set(TKR_CODES), koa_codes=set(KOA_CODES), washout=washout,
+            pred_time_lookup=pred_time_lookup,
         )
         with meds_reader.SubjectDatabase(args.meds_reader, num_threads=args.num_threads) as db:
             for chunk in db.map(worker):
-                for sid, outcome in chunk:
-                    if sid in labeled_ids and outcome is not None:
+                for sid, outcome, n_pre in chunk:
+                    if sid not in labeled_ids:
+                        continue
+                    if outcome is not None:
                         outcome_lookup[sid] = outcome
+                    if n_pre is not None:
+                        n_pre_lookup[sid] = n_pre
         print(f"  scanned in {time.time()-t0:.1f}s; "
-              f"{len(outcome_lookup):,} subjects have an outcome_time")
+              f"{len(outcome_lookup):,} subjects have an outcome_time; "
+              f"{len(n_pre_lookup):,} subjects have an event count")
     else:
-        print("--meds_reader not provided; outcome_time will be null")
+        print("--meds_reader not provided; outcome_time and n_events_before_pred will be null")
 
     # Build long-format dataframe (already sorted by rank — generate_motor_rollout
     # writes top-K in descending score order)
@@ -244,24 +276,54 @@ def main() -> None:
             per_subj_days[i] = int(delta_o / np.timedelta64(1, "D"))
     flat_d2o = np.repeat(per_subj_days, top_k).astype(np.int64)
 
+    # Per-subject pre-prediction event count (from meds_reader scan, repeated
+    # across this subject's top_k rows). -1 sentinel → null in the parquet.
+    per_subj_n_pre = np.array(
+        [n_pre_lookup.get(int(s), -1) for s in sids], dtype=np.int64
+    )
+    flat_n_pre = np.repeat(per_subj_n_pre, top_k)
+
     print(f"  built {n_rows:,} rows in {time.time()-t0:.1f}s")
 
     df = pl.DataFrame({
-        "subject_id":      flat_subj,
-        "prediction_time": pd.to_datetime(flat_ft).astype("datetime64[us]"),
-        "true_label":      flat_label,
-        "predicted_prob":  flat_score * 0 + flat_pred,  # keep dtype float32, NaN for missing
-        "in_test_set":     flat_in_test,
-        "outcome_time":    flat_outcome,
-        "days_to_outcome": flat_d2o,
-        "rank":            flat_rank,
-        "weight":          flat_score,
-        "code_string":     flat_leaf.tolist(),
-        "description":     flat_desc.tolist(),
-        "days_before":     flat_days_before.astype(np.int64),
-        "attended_time":   flat_attended,
-        "bag_codes":       flat_bag.tolist(),
+        "subject_id":           flat_subj,
+        "prediction_time":      pd.to_datetime(flat_ft).astype("datetime64[us]"),
+        "true_label":           flat_label,
+        "predicted_prob":       flat_score * 0 + flat_pred,  # keep dtype float32, NaN for missing
+        "in_test_set":          flat_in_test,
+        "outcome_time":         flat_outcome,
+        "days_to_outcome":      flat_d2o,
+        "n_events_before_pred": flat_n_pre,
+        "rank":                 flat_rank,
+        "weight":               flat_score,
+        "code_string":          flat_leaf.tolist(),
+        "description":          flat_desc.tolist(),
+        "days_before":          flat_days_before.astype(np.int64),
+        "attended_time":        flat_attended,
+        "bag_codes":            flat_bag.tolist(),
     })
+
+    # Drop padding rows: when a subject's segment has fewer than top_k
+    # positions, FEMRTransformer.forward / compute_attention_rollout marks
+    # the unused slots with NaN weight (and position 0). Older rollout
+    # pkls predate that change and instead used weight=0.0 for padding —
+    # filter both so the surviving rows only reflect real attended
+    # positions, then re-rank 1..n_real per subject so ranks stay
+    # contiguous.
+    n_before = df.height
+    df = df.filter(~pl.col("weight").is_nan() & (pl.col("weight") != 0.0))
+    n_dropped = n_before - df.height
+    if n_dropped:
+        print(f"  dropped {n_dropped:,} padding rows "
+              f"(NaN or zero weight); {df.height:,} rows remain")
+    df = df.with_columns(
+        pl.col("rank")
+          .rank(method="ordinal", descending=False)
+          .over("subject_id")
+          .cast(pl.Int32)
+          .alias("rank")
+    )
+
     df = df.with_columns([
         pl.when(pl.col("days_to_outcome") == days_missing_sentinel)
           .then(None).otherwise(pl.col("days_to_outcome").cast(pl.Int32))
@@ -270,6 +332,9 @@ def main() -> None:
           .then(None).otherwise(pl.col("predicted_prob"))
           .alias("predicted_prob"),
         pl.col("days_before").cast(pl.Int32),
+        pl.when(pl.col("n_events_before_pred") == -1)
+          .then(None).otherwise(pl.col("n_events_before_pred").cast(pl.Int32))
+          .alias("n_events_before_pred"),
     ])
 
     out.parent.mkdir(parents=True, exist_ok=True)

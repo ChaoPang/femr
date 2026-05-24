@@ -241,8 +241,12 @@ class FEMRTransformer(nn.Module):
         if do_inline_rollout:
             label_pos = rollout_label_indices.long().to(x.device)
             n_labels = label_pos.shape[0]
+            # Position 0 is a harmless default for the `[rollout_positions]`
+            # gather/index ops downstream; the NaN score is the signal for
+            # consumers that a slot is padding (seg_len < top_k) and should
+            # be filtered out (see extract_attention_rollout).
             top_positions = torch.zeros(n_labels, rollout_top_k, dtype=torch.long)
-            top_scores = torch.zeros(n_labels, rollout_top_k, dtype=torch.float32)
+            top_scores = torch.full((n_labels, rollout_top_k), float('nan'), dtype=torch.float32)
             for i, (seg_start, seg_len) in enumerate(zip(seg_starts, seg_lens)):
                 seg_end = seg_start + seg_len
                 seg_mask = (label_pos >= seg_start) & (label_pos < seg_end)
@@ -517,8 +521,10 @@ def compute_attention_rollout(
     # (subject_lengths is iterated via .tolist(); no device move needed.)
     label_pos = label_indices.long().to(device)
 
+    # NaN scores mark padding slots when a segment has fewer than top_k
+    # positions; positions stay at 0 so any downstream indexing remains valid.
     top_positions = torch.zeros(n_labels, top_k, dtype=torch.long)
-    top_scores = torch.zeros(n_labels, top_k, dtype=torch.float32)
+    top_scores = torch.full((n_labels, top_k), float('nan'), dtype=torch.float32)
 
     seg_start = 0
     for seg_len in subject_lengths.tolist():
