@@ -98,7 +98,7 @@ def main() -> None:
 
     # ---- apply filters ----
     _summary_cols = ["subject_id", "prediction_time", "true_label", "predicted_prob", "in_test_set"]
-    for _c in ("outcome_time", "days_to_outcome"):
+    for _c in ("outcome_time", "days_to_outcome", "n_events_before_pred"):
         if _c in df.columns:
             _summary_cols.append(_c)
     summary = (
@@ -132,9 +132,12 @@ def main() -> None:
     # ---- cohort table at the top ----
     st.subheader("Cohort summary")
     has_outcome = "outcome_time" in summary.columns
+    has_n_pre = "n_events_before_pred" in summary.columns
     cols = ["subject_id", "prediction_time", "ground_truth", "predicted_prob", "in_test_set"]
     if has_outcome:
         cols += ["outcome_time", "days_to_outcome"]
+    if has_n_pre:
+        cols.append("n_events_before_pred")
     st.dataframe(
         summary.with_columns([
             pl.col("true_label").alias("ground_truth"),
@@ -148,6 +151,7 @@ def main() -> None:
             "predicted_prob": st.column_config.NumberColumn(format="%.4f"),
             "outcome_time": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),
             "days_to_outcome": st.column_config.NumberColumn(format="%d"),
+            "n_events_before_pred": st.column_config.NumberColumn(format="%d"),
         },
     )
 
@@ -177,7 +181,10 @@ def main() -> None:
         return str(val)[:10]  # keep YYYY-MM-DD, drop time component
 
     row0 = summary.filter(pl.col("subject_id") == selected).to_dicts()[0]
-    cols = st.columns([1, 1, 1, 1, 1, 1]) if has_outcome else st.columns([1, 1, 1, 1])
+    # Build the metric column layout: always 4 base columns; +2 if we have
+    # outcome info; +1 if we have a pre-prediction event count.
+    n_metric_cols = 4 + (2 if has_outcome else 0) + (1 if has_n_pre else 0)
+    cols = st.columns([1] * n_metric_cols)
     cols[0].metric("subject_id", f"{row0['subject_id']}")
     cols[1].metric("ground truth", "TRUE" if row0["true_label"] else "FALSE")
     cols[2].metric(
@@ -185,16 +192,24 @@ def main() -> None:
         f"{row0['predicted_prob']:.4f}" if row0["predicted_prob"] is not None else "N/A (not test)",
     )
     cols[3].metric("prediction_time", _fmt_date(row0["prediction_time"]))
+    next_col = 4
     if has_outcome:
         outcome = row0.get("outcome_time")
         d2o = row0.get("days_to_outcome")
-        cols[4].metric(
+        cols[next_col].metric(
             "outcome_time (TKR)",
             _fmt_date(outcome),
         )
-        cols[5].metric(
+        cols[next_col + 1].metric(
             "days to TKR",
             f"{int(d2o)}" if d2o is not None else "—",
+        )
+        next_col += 2
+    if has_n_pre:
+        n_pre = row0.get("n_events_before_pred")
+        cols[next_col].metric(
+            "# events ≤ prediction_time",
+            f"{int(n_pre):,}" if n_pre is not None else "—",
         )
 
     tokens = (
