@@ -30,6 +30,15 @@ def create_arg_parser():
         default=None,
         help="The observation window for extracting features",
     )
+    args.add_argument(
+        "--variant",
+        dest="variant",
+        default=None,
+        help="Optional suffix matching generate_motor_features' --variant. Reads "
+             "features/<label>_motor_<variant>.pkl and writes results to "
+             "<label>/motor_<variant>/. When unset, the legacy `<label>_motor` / "
+             "`motor` paths are used.",
+    )
     return args
 
 
@@ -48,12 +57,20 @@ def main():
             raise RuntimeError(f"The user provided label does not exist at {label_path}")
 
     output_dir = pretraining_data / "results"
+    # Build the per-result subdir name: "motor" or "motor_<observation_window>"
+    # (legacy), plus an optional "_<variant>" suffix that lets multiple
+    # variants coexist without clobbering each other's results.
+    def _result_subdir_name() -> str:
+        name = "motor"
+        if args.observation_window:
+            name = name + f"_{args.observation_window}"
+        if args.variant:
+            name = name + f"_{args.variant}"
+        return name
+
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in labels:
-            if args.observation_window:
-                label_output_dir = output_dir / label_name / f"motor_{args.observation_window}"
-            else:
-                label_output_dir = output_dir / label_name / f"motor"
+            label_output_dir = output_dir / label_name / _result_subdir_name()
             label_output_dir.mkdir(exist_ok=True, parents=True)
             test_result_file = label_output_dir / 'metrics.json'
             features_label_data = label_output_dir / 'features_with_label'
@@ -63,7 +80,9 @@ def main():
                 continue
             labels = pd.read_parquet(pretraining_data / "labels" / (label_name + '.parquet'))
 
-            motor_features_name = get_motor_features_name(label_name, args.observation_window)
+            motor_features_name = get_motor_features_name(
+                label_name, args.observation_window, args.variant
+            )
             with open(pretraining_data / 'features' / f"{motor_features_name}.pkl", 'rb') as f:
                 features = pickle.load(f)
 

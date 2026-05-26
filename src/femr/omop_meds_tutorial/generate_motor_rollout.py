@@ -65,6 +65,22 @@ def create_arg_parser():
         action="store_true",
         help="Recompute rollout even if the output pkl exists",
     )
+    args.add_argument(
+        "--model_dir",
+        dest="model_dir",
+        default="motor_model",
+        help="Directory holding the pretrained MOTOR weights + config + dictionary.msgpack. "
+             "If a relative path, it is resolved against --pretraining_data. Defaults to "
+             "the legacy `motor_model` subdir for backwards compatibility.",
+    )
+    args.add_argument(
+        "--variant",
+        dest="variant",
+        default=None,
+        help="Optional suffix appended to the rollout pkl basename: produces "
+             "features/<label>_motor_<variant>_rollout.pkl. When unset, the legacy "
+             "`<label>_motor_rollout` path is used.",
+    )
     return args
 
 
@@ -73,10 +89,24 @@ def read_recursive_parquet(root_dir):
     return pd.concat((pd.read_parquet(f) for f in files), ignore_index=True)
 
 
-def get_rollout_output_name(label_name: str, observation_window=None) -> str:
+def get_rollout_output_name(
+    label_name: str,
+    observation_window=None,
+    variant=None,
+) -> str:
+    """Build the canonical basename for a motor rollout pkl.
+
+    Pattern (suffix order keeps backwards compat when ``variant`` is None):
+        <label>_motor_rollout                                  # default
+        <label>_motor_<observation_window>_rollout             # legacy windowed
+        <label>_motor_<variant>_rollout                        # variant only (new)
+        <label>_motor_<observation_window>_<variant>_rollout   # both (new)
+    """
     base = label_name + "_motor"
     if observation_window:
-        base = label_name + f"_motor_{observation_window}"
+        base = base + f"_{observation_window}"
+    if variant:
+        base = base + f"_{variant}"
     return base + "_rollout"
 
 
@@ -116,9 +146,15 @@ def main():
     main_split = femr.splits.SubjectSplit.load_from_csv(str(split_path))
     test_subject_ids = set(main_split.test_subject_ids)
 
+    # Resolve model dir (lazy import to avoid circular dep at module import time).
+    from .generate_motor_features import resolve_model_dir
+    model_dir_path = resolve_model_dir(pretraining_data, args.model_dir)
+
     with meds_reader.SubjectDatabase(args.meds_reader, num_threads=6) as database:
         for label_name in labels_to_process:
-            rollout_name = get_rollout_output_name(label_name, args.observation_window)
+            rollout_name = get_rollout_output_name(
+                label_name, args.observation_window, args.variant
+            )
             rollout_output_path = features_path / f"{rollout_name}.pkl"
 
             if rollout_output_path.exists() and not args.overwrite:
@@ -148,7 +184,7 @@ def main():
             )
             rollout = femr.models.transformer.compute_features(
                 db=database,
-                model_path=str(pretraining_data / "motor_model"),
+                model_path=str(model_dir_path),
                 labels=test_labels,
                 ontology=ontology,
                 device=torch.device("cuda"),

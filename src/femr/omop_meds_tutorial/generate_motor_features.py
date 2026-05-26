@@ -43,6 +43,23 @@ def create_arg_parser():
         default=None,
         help="The observation window for extracting features",
     )
+    args.add_argument(
+        "--model_dir",
+        dest="model_dir",
+        default="motor_model",
+        help="Directory holding the pretrained MOTOR weights + config + dictionary.msgpack. "
+             "If a relative path, it is resolved against --pretraining_data. Defaults to "
+             "the legacy `motor_model` subdir for backwards compatibility.",
+    )
+    args.add_argument(
+        "--variant",
+        dest="variant",
+        default=None,
+        help="Optional suffix appended to the features pkl basename (and used by "
+             "finetune_motor's results subdir). e.g. --variant plain produces "
+             "features/<label>_motor_plain.pkl and results/<label>/motor_plain/. "
+             "When unset, the legacy `<label>_motor` / `motor` paths are used.",
+    )
     return args
 
 
@@ -52,10 +69,36 @@ def read_recursive_parquet(root_dir):
     return df
 
 
-def get_motor_features_name(label_name: str, observation_window: Optional[int] = None) -> str:
+def resolve_model_dir(pretraining_data: pathlib.Path, model_dir: str) -> pathlib.Path:
+    """Resolve the MOTOR model directory.
+
+    If ``model_dir`` is absolute, return it as-is. Otherwise resolve it
+    against ``pretraining_data``. Defaults preserve the legacy behavior
+    where the model lives at ``pretraining_data/motor_model``.
+    """
+    p = pathlib.Path(model_dir)
+    return p if p.is_absolute() else pretraining_data / p
+
+
+def get_motor_features_name(
+    label_name: str,
+    observation_window: Optional[int] = None,
+    variant: Optional[str] = None,
+) -> str:
+    """Build the canonical basename for a motor features pkl.
+
+    Pattern (suffix order keeps backwards compat when ``variant`` is None):
+        <label>_motor                                  # default
+        <label>_motor_<observation_window>             # legacy windowed
+        <label>_motor_<variant>                        # variant only (new)
+        <label>_motor_<observation_window>_<variant>   # both (new)
+    """
+    name = label_name + '_motor'
     if observation_window:
-        return label_name + '_motor_' + str(observation_window)
-    return label_name + '_motor'
+        name = name + '_' + str(observation_window)
+    if variant:
+        name = name + '_' + variant
+    return name
 
 
 def main():
@@ -95,8 +138,11 @@ def main():
             )
             labels = [label_name]
 
+        model_dir_path = resolve_model_dir(pretraining_data, args.model_dir)
         for label_name in labels:
-            motor_features_name = get_motor_features_name(label_name, args.observation_window)
+            motor_features_name = get_motor_features_name(
+                label_name, args.observation_window, args.variant
+            )
             feature_output_path = features_path / f"{motor_features_name}.pkl"
             training_metrics_file = flops_path / f"{motor_features_name}.json"
             if feature_output_path.exists():
@@ -119,7 +165,7 @@ def main():
             start_time: datetime.datetime = datetime.datetime.now()
             features = femr.models.transformer.compute_features(
                 db=database,
-                model_path=str(pretraining_data / "motor_model"),
+                model_path=str(model_dir_path),
                 labels=typed_labels,
                 ontology=ontology,
                 device=torch.device('cuda'),
