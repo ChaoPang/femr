@@ -73,8 +73,15 @@ SYSTEM_PROMPT = textwrap.dedent("""\
         medications, visits, labs) recorded prior to and including the first
         KOA diagnosis date
 
-    You must return a single calibrated probability in [0, 1] and a brief
-    rationale citing specific evidence from the trajectory.
+    You must return, in this order:
+      - positive_signals: a list of specific findings in the trajectory that
+        raise TKR risk, each with a short description (citing the relevant
+        date/event) and a weight in [0, 1] reflecting strength.
+      - negative_signals: a list of specific findings that lower TKR risk,
+        each with description and weight.
+      - probability_5y: a single calibrated probability in [0, 1].
+      - rationale: 2-4 sentences synthesizing the signals into the final
+        estimate.
 
     # Background on the prediction task
     - The cohort is patients whose first KOA diagnosis (SNOMED OA-of-knee or
@@ -89,26 +96,38 @@ SYSTEM_PROMPT = textwrap.dedent("""\
       "history of TKR" code before first KOA were already excluded from the
       cohort. So every patient you see has no documented prior knee
       arthroplasty in their record.
-    - The base rate of 5-year TKR in this cohort is roughly 17%.
 
-    # What good prediction looks like
-    Calibrated probabilities, not just rank ordering. Use:
-      - Clinical severity signals (meniscal tears, advanced OA imaging,
-        chronic NSAID/opioid use, prior intra-articular injections,
-        knee-related orthopedic visits)
-      - Patient factors (age at diagnosis, BMI proxies like obesity codes,
-        diabetes, smoking status — all of which influence both progression
-        rate and surgical candidacy)
-      - Health-system signals (specialty orthopedic visits, MRI/X-ray
-        of knee, physical therapy referrals)
-      - Counter-evidence (younger patient, very sparse record, no prior
-        knee complaints, recent first knee visit only)
+    # Calibration guidance
+    - Use the full [0, 1] range. Do NOT anchor your prediction to a fixed
+      base rate; do not cluster predictions in a narrow band around any
+      "default" value. If the signals point clearly one way, the
+      probability should reflect that.
+    - Strong evidence for surgical progression — advanced OA on imaging,
+      prior intra-articular injections (corticosteroid/hyaluronic acid),
+      chronic NSAID or opioid use for knee pain, prior orthopedic visits
+      for knee, meniscal tears under surgical evaluation, prior knee
+      arthroscopy — should produce probabilities well above 0.5.
+    - Patient factors (older age, especially 60-80; obesity codes;
+      diabetes; smoking) meaningfully raise risk even when no
+      knee-specific workup is recorded. In this dataset many patients
+      receive their first KOA diagnosis and progress to TKR with little
+      documented intermediate workup, so do not require dense
+      knee-specific history before raising the probability.
 
-    Do NOT inflate the probability just because a comorbidity is present;
-    surgical candidacy depends on the *knee* picture more than overall
-    illness burden. Conversely, a patient with established advanced OA,
-    chronic pain management, and prior orthopedic visits is a high-risk
-    candidate even without comorbidities.
+    # Treatment of sparse / "absent" evidence
+    A sparse record, or absence of severity markers, is NOT itself
+    evidence against TKR. Absence of evidence is not evidence of absence.
+    Only *documented* contraindications should pull the probability
+    meaningfully below the cohort's typical range:
+      - Very young age (<45) with no prior knee complaints
+      - Very recent first knee complaint with no comorbidities and
+        no risk factors
+      - Documented severe surgical contraindications (e.g., active
+        malignancy on therapy, severe frailty, end-stage organ failure
+        making elective surgery implausible)
+    If none of those are present, comorbidity burden and age push the
+    probability upward, regardless of how thin the knee-specific record
+    looks. Many true positives in this cohort have sparse records.
 """)
 
 
@@ -119,9 +138,9 @@ USER_PROMPT_TEMPLATE = textwrap.dedent("""\
 
     {narrative}
 
-    Return JSON with:
-      - probability_5y: a single float in [0, 1]
-      - rationale: 2-4 sentences citing specific evidence from the trajectory
+    Return JSON with positive_signals first, then negative_signals, then
+    probability_5y, then rationale. Cite specific dates/events from the
+    trajectory in each signal description.
 """)
 
 
@@ -129,13 +148,31 @@ USER_PROMPT_TEMPLATE = textwrap.dedent("""\
 # Structured output schema
 # ---------------------------------------------------------------------------
 
+class Signal(BaseModel):
+    description: str = Field(
+        description="Short phrase citing the specific date/event from the trajectory.",
+    )
+    weight: float = Field(
+        ge=0.0, le=1.0,
+        description="Strength of this signal, 0 (weak hint) to 1 (decisive).",
+    )
+
+
 class TKRPrediction(BaseModel):
+    positive_signals: list[Signal] = Field(
+        default_factory=list,
+        description="Findings raising TKR probability. Enumerate before predicting.",
+    )
+    negative_signals: list[Signal] = Field(
+        default_factory=list,
+        description="Findings lowering TKR probability. Enumerate before predicting.",
+    )
     probability_5y: float = Field(
         ge=0.0, le=1.0,
         description="Calibrated probability the patient undergoes TKR within 5 years.",
     )
     rationale: str = Field(
-        description="2-4 sentence justification citing specific events from the trajectory.",
+        description="2-4 sentence synthesis of the signals into the final estimate.",
     )
 
 
@@ -236,6 +273,8 @@ async def _predict_one(
             record.update({
                 "claude_predicted_prob": float(parsed.probability_5y) if parsed else None,
                 "claude_rationale": parsed.rationale if parsed else None,
+                "claude_positive_signals": [s.model_dump() for s in parsed.positive_signals] if parsed else None,
+                "claude_negative_signals": [s.model_dump() for s in parsed.negative_signals] if parsed else None,
                 "stop_reason": response.stop_reason,
                 "input_tokens": response.usage.input_tokens,
                 "output_tokens": response.usage.output_tokens,
@@ -397,28 +436,41 @@ def run_evaluate(args) -> None:
         else:
             print(f"  {name:<18} {c:>10.4f}")
 
-    if args.metrics_out:
-        out = pathlib.Path(args.metrics_out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "n": int(len(y_true)),
-            "n_positives": int(y_true.sum()),
-            "base_rate": float(y_true.mean()),
-            "claude": {
-                "roc_auc": float(roc_auc_score(y_true, y_claude)),
-                "pr_auc": float(average_precision_score(y_true, y_claude)),
-                "brier": float(brier_score_loss(y_true, y_claude)),
-            },
+    metrics_out = pathlib.Path(args.metrics_out) if args.metrics_out else preds_path.parent / "metrics.json"
+    metrics_out.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "n": int(len(y_true)),
+        "n_positives": int(y_true.sum()),
+        "base_rate": float(y_true.mean()),
+        "claude": {
+            "roc_auc": float(roc_auc_score(y_true, y_claude)),
+            "pr_auc": float(average_precision_score(y_true, y_claude)),
+            "brier": float(brier_score_loss(y_true, y_claude)),
+        },
+    }
+    if has_motor:
+        payload["motor"] = {
+            "roc_auc": float(roc_auc_score(y_true, y_motor)),
+            "pr_auc": float(average_precision_score(y_true, y_motor)),
+            "brier": float(brier_score_loss(y_true, y_motor)),
         }
-        if has_motor:
-            payload["motor"] = {
-                "roc_auc": float(roc_auc_score(y_true, y_motor)),
-                "pr_auc": float(average_precision_score(y_true, y_motor)),
-                "brier": float(brier_score_loss(y_true, y_motor)),
-            }
-        with open(out, "w") as f:
-            json.dump(payload, f, indent=2)
-        print(f"\n  metrics written to {out}", file=sys.stderr)
+    with open(metrics_out, "w") as f:
+        json.dump(payload, f, indent=2)
+    print(f"\n  metrics written to {metrics_out}", file=sys.stderr)
+
+    # Also write predictions.parquet next to the JSONL, matching the schema
+    # used by motor/results/<task>/<model>/test_predictions/predictions.parquet
+    # so downstream tools can treat Claude like any other baseline.
+    parquet_out = preds_path.parent / "predictions.parquet"
+    out_df = df.select([
+        pl.col("subject_id").cast(pl.Int64),
+        pl.col("prediction_time").str.to_datetime(strict=False).alias("prediction_time"),
+        pl.col("claude_predicted_prob").cast(pl.Float64).alias("predicted_boolean_probability"),
+        pl.col("true_label").cast(pl.Boolean).alias("boolean_value"),
+        pl.col("claude_rationale").alias("rationale"),
+    ])
+    out_df.write_parquet(parquet_out)
+    print(f"  predictions written to {parquet_out}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
