@@ -238,7 +238,9 @@ class TKRSinceKOALabeler(Labeler):
                     first_koa_time = event.time
                 continue
             # first_koa_time is set; look for the first TKR strictly after washout.
-            if event.code in self.tkr_codes and event.time > first_koa_time + self.tkr_washout:
+            if event.code in self.tkr_codes:
+                if event.time <= first_koa_time + self.tkr_washout:
+                    return []  # TKR within washout window — pre-planned, exclude subject
                 first_tkr_after_koa_time = event.time
                 break
 
