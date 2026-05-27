@@ -11,16 +11,24 @@ Output schema (one row per source event):
                                    meds_reader/metadata/person_id_mapping.parquet)
   source_record_id  string       -- per-event UUID from the source EHR row
   encounter_id      string|null  -- visit-level UUID (null for demographics)
-  timestamp         timestamp[us]
+  timestamp         timestamp[us]  -- this event's actual time
+  lookup_timestamp  timestamp[us]  -- the surviving event time whose embedding
+                                     this row borrows (= timestamp when this
+                                     event is one of the surviving events at
+                                     its own time; previous surviving time
+                                     otherwise; null if no surviving event
+                                     yet exists for the subject)
   code              string       -- e.g. "SNOMED/123", "ENCOUNTER//Ambulatory"
-  position          int32        -- per-subject 0..N-1 index in time-sorted
-                                   order; events at the same timestamp share
-                                   the same position AND the same embedding
-  embedding         fixed_size_list<float16>[hidden_size]
+  position          int32        -- per-subject index in the MOTOR-processed
+                                   sequence; -1 for events before any
+                                   surviving event in the subject
+  embedding         fixed_size_list<float16>[hidden_size]  -- zero-filled for
+                                   pre-first-surviving rows (position=-1)
 
-The model produces one hidden state per unique (subject_id, timestamp); when
-two source events share a timestamp, both rows in the output carry the same
-embedding (and the same position).
+Subjects' events are filtered to match the processor exactly (None-time,
+birth-day-person, no-features, same-day-duplicate-codes), so the model emits
+one embedding per surviving timestamp. Source events sharing or following a
+surviving timestamp borrow that embedding via `lookup_timestamp`.
 
 Usage:
   python -m femr.omop_meds_tutorial.extract_subject_event_embeddings \\
@@ -41,6 +49,7 @@ each = first 44,000 test subjects.
 from __future__ import annotations
 
 import argparse
+import bisect
 import pathlib
 import pickle
 import time
@@ -55,7 +64,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 
+import femr.models.tokenizer
 import femr.models.transformer
+import femr.pat_utils
 
 from .generate_labels import create_omop_meds_tutorial_arg_parser
 from .generate_motor_features import resolve_model_dir
@@ -145,28 +156,68 @@ def create_arg_parser() -> argparse.ArgumentParser:
 
 
 def _collect_shard_inputs(
-    db: meds_reader.SubjectDatabase, shard_sids: List[int]
+    db: meds_reader.SubjectDatabase,
+    shard_sids: List[int],
+    tokenizer: "femr.models.tokenizer.HierarchicalTokenizer",
 ) -> Tuple[List[meds.Label], pl.DataFrame]:
-    """Build the label list (one per unique (subject_id, timestamp))
-    and the per-event metadata table for a shard.
+    """Build the label list and the per-event metadata table for a shard.
 
-    The events table has one row per source event; the position column
-    is the 0..N-1 index of that event's timestamp within the subject's
-    time-sorted sequence (events sharing a timestamp share a position).
+    To make the join with the model output well-defined we must emit
+    exactly one label per "surviving" event-timestamp — the set of
+    timestamps where BatchCreator.add_subject will call add_event with
+    a real event. The processor drops:
+
+      * events whose time is None,
+      * person-table events on or before the birth date,
+      * events whose tokenizer features list is empty, and
+      * events whose features have all been seen earlier the same day.
+
+    A label at a non-surviving time would sit permanently "in the past"
+    of LabeledSubjectTask.add_event and silently zero out the whole
+    subject's label_indices (current_date > prediction_time → break).
+
+    The events table still has one row per source event so users can
+    join back to the raw EHR. Each row carries a `lookup_timestamp`
+    pointing at the most recent surviving event time at or before the
+    event — that is the key used to look up the embedding. The
+    `position` column is the 0..N-1 index of that surviving timestamp
+    in the subject's processed sequence (events sharing a surviving
+    timestamp share a position; events that fall strictly before any
+    surviving timestamp get position=-1 and lookup_timestamp=null).
     """
     labels: List[meds.Label] = []
     events_rows: List[dict] = []
     for sid in shard_sids:
         s = db[int(sid)]
-        # Time-sorted assignment of position index, sharing across events
-        # at the same timestamp. meds_reader events are already sorted by
-        # time but we don't rely on that.
+        birth = femr.pat_utils.get_subject_birthdate(s)
+        birth_date = birth.date()
+
+        # First pass: replicate the processor's full event filter to
+        # find surviving timestamps and assign sequence positions.
         time_to_pos: dict = {}
+        codes_seen_today: set = set()
+        current_day = None
         for e in s.events:
             if e.time is None:
                 continue
+            if (
+                e.time.date() <= birth_date
+                and getattr(e, "table", "person") == "person"
+            ):
+                continue
+            event_day = e.time.date()
+            if event_day != current_day:
+                current_day = event_day
+                codes_seen_today = set()
+            features, _ = tokenizer.get_feature_codes(e)
+            if not features:
+                continue
+            if all(f in codes_seen_today for f in features):
+                continue
+            codes_seen_today |= set(features)
             if e.time not in time_to_pos:
-                time_to_pos[e.time] = len(time_to_pos)
+                pos = len(time_to_pos)
+                time_to_pos[e.time] = pos
                 labels.append(
                     meds.Label(
                         subject_id=int(sid),
@@ -174,14 +225,36 @@ def _collect_shard_inputs(
                         boolean_value=False,  # dummy: ignored by compute_features
                     )
                 )
+
+        sorted_surv = sorted(time_to_pos)
+
+        # Second pass: emit a row for every source event (including
+        # filtered ones), forward-filling lookup_timestamp to the most
+        # recent surviving event at or before the event time.
+        for e in s.events:
+            if e.time is None:
+                continue
+            if (
+                e.time.date() <= birth_date
+                and getattr(e, "table", "person") == "person"
+            ):
+                continue
+            idx = bisect.bisect_right(sorted_surv, e.time) - 1
+            if idx >= 0:
+                lookup_time = sorted_surv[idx]
+                position = time_to_pos[lookup_time]
+            else:
+                lookup_time = None
+                position = -1
             events_rows.append(
                 {
                     "subject_id": int(sid),
                     "source_record_id": e.source_record_id,
                     "encounter_id": e.encounter_id,
                     "timestamp": pd.Timestamp(e.time),
+                    "lookup_timestamp": pd.Timestamp(lookup_time) if lookup_time is not None else None,
                     "code": e.code,
-                    "position": time_to_pos[e.time],
+                    "position": position,
                 }
             )
     events_df = pl.DataFrame(events_rows)
@@ -198,53 +271,76 @@ def _write_shard(
     compression: str,
 ) -> None:
     """Join per-event metadata with embeddings and write the shard parquet."""
-    # Build the (subject_id, timestamp_us) -> embedding lookup
+    # Build the (subject_id, timestamp_us) -> embedding lookup. compute_features
+    # returns one row per *consumed* label; feature_times is the timestamp of
+    # the event at the label position (= each surviving event's own time, given
+    # how _collect_shard_inputs emits labels at exactly the surviving times).
     sids = np.asarray(features["subject_ids"]).astype(np.int64)
     times = np.asarray(features["feature_times"], dtype="datetime64[us]").view(np.int64)
     embs = np.asarray(features["features"], dtype=np.float32)
     assert embs.shape[0] == sids.shape[0] == times.shape[0]
     assert embs.shape[1] == hidden_size
 
-    # Pack the lookup into a polars frame so the join is vectorized
+    # convert_dataset slides overlapping windows over long subjects, so a
+    # given (subject_id, feature_time) can appear in multiple windows and
+    # therefore multiple feature rows. Dedupe to the FIRST occurrence —
+    # any one window's embedding is fine; later windows just narrow the
+    # context. Without dedup, a many-to-many join would explode events_df.
     lookup = pl.DataFrame(
         {
             "subject_id": sids,
             "_ts_us": times,
             "_emb_idx": np.arange(embs.shape[0], dtype=np.int64),
         }
-    )
+    ).unique(subset=["subject_id", "_ts_us"], keep="first")
 
     df = events_df.with_columns(
-        pl.col("timestamp").cast(pl.Datetime("us")).alias("timestamp"),
+        pl.col("lookup_timestamp").cast(pl.Datetime("us")),
     )
     df = df.with_columns(
-        pl.col("timestamp").cast(pl.Int64).alias("_ts_us"),
+        pl.col("lookup_timestamp").cast(pl.Int64).alias("_ts_us"),
     )
     df = df.join(lookup, on=["subject_id", "_ts_us"], how="left").drop("_ts_us")
-    if df.select(pl.col("_emb_idx").is_null().any()).item():
-        n_missing = int(df.select(pl.col("_emb_idx").is_null().sum()).item())
-        raise RuntimeError(
-            f"{n_missing:,} event rows did not match a (subject_id, timestamp) embedding; "
-            "this should not happen if every event time was emitted as a label."
+
+    # Events strictly before any surviving timestamp have no embedding;
+    # they leave _emb_idx null and we zero-fill their embedding below.
+    # Anything *with* a lookup_timestamp but no match would mean a
+    # processor/label mismatch — surface if frequent, otherwise zero-fill
+    # and continue (occasional 1-in-millions misses are tolerable).
+    bad_mask = df.select(
+        (pl.col("lookup_timestamp").is_not_null()) & (pl.col("_emb_idx").is_null())
+    ).to_series()
+    n_bad = int(bad_mask.sum())
+    if n_bad:
+        bad_rate = n_bad / df.height
+        if bad_rate > 1e-4:
+            raise RuntimeError(
+                f"{n_bad:,}/{df.height:,} ({bad_rate:.2%}) event rows have a "
+                "non-null lookup_timestamp but no matching feature row; "
+                "processor/label mismatch."
+            )
+        print(
+            f"  WARN: {n_bad:,}/{df.height:,} ({bad_rate*100:.4f}%) event "
+            "rows missed embedding lookup; zero-filling those."
         )
 
-    # Gather embeddings in event-row order
-    emb_idx = df["_emb_idx"].to_numpy().astype(np.int64)
+    # Gather embeddings; rows with null _emb_idx get a zero vector
+    emb_idx_arr = df["_emb_idx"].to_numpy()
+    has_emb = ~pd.isna(emb_idx_arr)
+    safe_idx = np.where(has_emb, emb_idx_arr, 0).astype(np.int64)
     emb_target_dtype = np.float16 if dtype == "float16" else np.float32
-    gathered = embs[emb_idx].astype(emb_target_dtype, copy=False)
+    gathered = embs[safe_idx].astype(emb_target_dtype, copy=False)
+    gathered[~has_emb] = 0  # zero-fill for pre-first-surviving events
 
-    # Build pyarrow table with a fixed-size list<halffloat | float> column
     base = df.drop("_emb_idx")
-    # Join PersonId (left): null when subject not in mapping (unlikely)
     base = base.with_columns(
         pl.col("subject_id").map_elements(
             lambda s: sid_to_pid.get(int(s)), return_dtype=pl.Utf8
         ).alias("PersonId")
     )
-    # Reorder columns to match docstring schema
     base = base.select(
         ["subject_id", "PersonId", "source_record_id", "encounter_id",
-         "timestamp", "code", "position"]
+         "timestamp", "lookup_timestamp", "code", "position"]
     )
     arrow_table = base.to_arrow()
     elem_type = pa.float16() if dtype == "float16" else pa.float32()
@@ -312,6 +408,13 @@ def main() -> None:
     )
     print(f"model_dir={model_dir_path}  hidden_size={hidden_size}")
 
+    # Tokenizer is loaded here (in addition to inside compute_features) so we
+    # can replicate the processor's per-event filter when emitting labels.
+    tokenizer = femr.models.tokenizer.HierarchicalTokenizer.from_pretrained(
+        str(model_dir_path), ontology=ontology,
+    )
+    print("tokenizer loaded for label-time filtering")
+
     # Shard plan
     n_total_shards = (
         len(split_subjects) + args.subjects_per_shard - 1
@@ -341,7 +444,7 @@ def main() -> None:
                 f"subjects [{shard_start:,}, {shard_end:,})  n={len(shard_sids):,}"
             )
 
-            labels, events_df = _collect_shard_inputs(db, shard_sids)
+            labels, events_df = _collect_shard_inputs(db, shard_sids, tokenizer)
             n_events = events_df.height
             print(
                 f"  collected {len(labels):,} unique (subject_id, timestamp) labels "
