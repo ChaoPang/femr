@@ -113,6 +113,16 @@ class MotorArguments:
                     "absolute improvement, no matter how small."
         },
     )
+    reasoning_temporal_anchor: bool = dataclasses.field(
+        default=False,
+        metadata={
+            "help": "If True, rotate each retrieved reasoning_embedding by a per-patient "
+                    "temporal phase derived from the age at which the patient most recently "
+                    "encountered that concept (closest-past). Anchors each concept to its "
+                    "specific occurrence in the patient's journal rather than treating it "
+                    "as a global atemporal symbol."
+        },
+    )
 
 
 def parse_arguments()-> (
@@ -163,6 +173,7 @@ def main():
         reasoning_embedding_init_path=motor_args.reasoning_embedding_init_path,
         reasoning_constrain_to_history=motor_args.reasoning_constrain_to_history,
         reasoning_embedding_freeze=motor_args.reasoning_embedding_freeze,
+        reasoning_temporal_anchor=motor_args.reasoning_temporal_anchor,
     )
 
     config = femr.models.config.FEMRModelConfig.from_transformer_task_configs(

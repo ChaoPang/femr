@@ -448,10 +448,15 @@ class ReasoningLayer(nn.Module):
         hidden_size: int,
         vocab_size: int,
         top_k: int,
+        n_heads: int = 12,
         init_embedding: Optional[torch.Tensor] = None,
+        temporal_anchor: bool = False,
     ):
         super().__init__()
         self.top_k = top_k
+        self.n_heads = n_heads
+        self.head_size = hidden_size // n_heads
+        self.temporal_anchor = temporal_anchor
         self.vocab_projection = nn.Linear(hidden_size, vocab_size, bias=False)
         self.reasoning_embedding = nn.Embedding(vocab_size, hidden_size)
         if init_embedding is not None:
@@ -468,6 +473,8 @@ class ReasoningLayer(nn.Module):
         self,
         hidden_state: torch.Tensor,
         history_mask: Optional[torch.Tensor] = None,
+        temporal_data: Optional[Dict[str, torch.Tensor]] = None,
+        ages: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Project hidden state -> vocab logits -> top-k softmax -> weighted sum of
         reasoning embeddings.
@@ -476,6 +483,12 @@ class ReasoningLayer(nn.Module):
         entries are forced to -inf so the top-k selection cannot pick them. Used
         with reasoning_constrain_to_history to restrict attention to tokens that
         actually appear in each prediction's patient history.
+
+        If ``temporal_data`` and ``ages`` are given (only when temporal_anchor=True),
+        each retrieved reasoning_embedding is rotated by a per-token rotary phase
+        derived from the age at which that vocab token most recently appeared in
+        the patient's history (closest_past). Anchors atemporal global concept
+        embeddings to patient-specific occurrence times.
 
         When the mask has fewer than ``top_k`` True entries for a row, topk still
         returns ``top_k`` indices but the masked ones carry weight ~0 after the
@@ -489,6 +502,43 @@ class ReasoningLayer(nn.Module):
         top_vals, top_idx = logits.topk(self.top_k, dim=-1)      # [N, k], [N, k]
         weights = torch.softmax(top_vals, dim=-1)                # [N, k]
         top_embeds = self.reasoning_embedding(top_idx)           # [N, k, hidden]
+
+        if self.temporal_anchor and temporal_data is not None and ages is not None:
+            # Resolve closest-past position per (label, top_idx[k]) via global searchsorted.
+            sorted_keys = temporal_data["sorted_keys"]            # [n_tokens] monotonic
+            sorted_position = temporal_data["sorted_position"]    # [n_tokens]
+            sorted_seg = temporal_data["sorted_seg"]              # [n_tokens]
+            sorted_vocab = temporal_data["sorted_vocab"]          # [n_tokens]
+            label_segments = temporal_data["label_segments"]      # [N]
+            label_indices = temporal_data["label_indices"]        # [N]
+            BIG = int(temporal_data["BIG"])
+            V = int(temporal_data["V"])
+
+            N, K = top_idx.shape
+            query_seg = label_segments.unsqueeze(1)               # [N, 1]
+            query_keys = (query_seg.long() * V + top_idx.long()) * BIG + label_indices.unsqueeze(1).long()  # [N, K]
+
+            search_idx = torch.searchsorted(sorted_keys, query_keys.flatten(), right=True) - 1  # [N*K]
+            safe_idx = search_idx.clamp(min=0)
+            landed_seg = sorted_seg[safe_idx]
+            landed_vocab = sorted_vocab[safe_idx]
+            valid = (
+                (search_idx >= 0)
+                & (landed_seg == query_seg.expand(-1, K).reshape(-1).long())
+                & (landed_vocab == top_idx.reshape(-1).long())
+            )                                                     # [N*K]
+            closest_pos = sorted_position[safe_idx]               # [N*K]
+            # For invalid slots (shouldn't happen with history-mask on; defensive) use 0 → no rotation.
+            closest_pos = torch.where(valid, closest_pos, torch.zeros_like(closest_pos)).view(N, K)
+            closest_ages = ages[closest_pos].float()              # [N, K]
+            closest_ages = torch.where(valid.view(N, K), closest_ages, torch.zeros_like(closest_ages))
+
+            ages_flat = closest_ages.reshape(N * K)
+            sincos = fixed_pos_embedding(ages_flat, self.head_size, top_embeds.dtype)
+            top_embeds_h = top_embeds.reshape(N * K, self.n_heads, self.head_size)
+            top_embeds_h = apply_rotary_pos_emb(top_embeds_h, sincos)
+            top_embeds = top_embeds_h.reshape(N, K, -1)
+
         output = (weights.unsqueeze(-1) * top_embeds).sum(dim=1) # [N, hidden]
         return output, top_idx, weights
 
@@ -582,12 +632,75 @@ class FEMRModel(transformers.PreTrainedModel):
                 hidden_size=self.config.transformer_config.hidden_size,
                 vocab_size=self.config.transformer_config.vocab_size,
                 top_k=self.config.transformer_config.reasoning_top_k,
+                n_heads=self.config.transformer_config.n_heads,
                 init_embedding=init_embedding,
+                temporal_anchor=self.config.transformer_config.reasoning_temporal_anchor,
             )
             if self.config.transformer_config.reasoning_embedding_freeze:
                 self.reasoning_layer.reasoning_embedding.weight.requires_grad = False
         if self.config.task_config is not None:
             self.task_model = self.create_task_head()
+
+    def _build_reasoning_history_data(
+        self, batch: Mapping[str, Any], segment_ids: torch.Tensor
+    ) -> Tuple[torch.Tensor, Optional[Dict[str, torch.Tensor]]]:
+        """Build history_mask plus (optional) temporal anchor data.
+
+        Returns:
+            history_mask: same as _build_reasoning_history_mask.
+            temporal_data: None unless reasoning_temporal_anchor=True. When enabled,
+                contains the sorted (segment, vocab, position) index used by the
+                ReasoningLayer to resolve closest-past occurrences via searchsorted.
+        """
+        history_mask = self._build_reasoning_history_mask(batch, segment_ids)
+        if not self.config.transformer_config.reasoning_temporal_anchor:
+            return history_mask, None
+
+        tcfg = self.config.transformer_config
+        V = tcfg.vocab_size
+        tb = batch["transformer"]
+        label_indices = tb["label_indices"].long()
+        device = label_indices.device
+        seg = segment_ids.long()
+
+        if tcfg.is_hierarchical:
+            tokens = tb["hierarchical_tokens"].long().view(-1)
+            token_indices = tb["token_indices"].long().view(-1)
+            n_positions = seg.shape[0]
+            position_lengths = token_indices[1:] - token_indices[:-1]
+            token_position = torch.repeat_interleave(
+                torch.arange(n_positions, device=device, dtype=torch.long),
+                position_lengths,
+            )
+            token_segment = torch.repeat_interleave(seg, position_lengths)
+        else:
+            tokens = tb["tokens"].long().view(-1)
+            n_positions = tokens.shape[0]
+            token_position = torch.arange(n_positions, device=device, dtype=torch.long)
+            token_segment = seg
+
+        # Encode (seg, vocab, position) into a single monotonic int64 key so a single
+        # global torch.searchsorted answers every (label, top_idx[k]) lookup.
+        BIG = int(n_positions) + 1
+        sort_keys_unsorted = (token_segment * V + tokens) * BIG + token_position
+        sort_idx = sort_keys_unsorted.argsort()
+        sorted_keys = sort_keys_unsorted[sort_idx]
+        sorted_position = token_position[sort_idx]
+        sorted_seg = token_segment[sort_idx]
+        sorted_vocab = tokens[sort_idx]
+
+        label_segments = seg[label_indices]
+        temporal_data = {
+            "sorted_keys": sorted_keys,
+            "sorted_position": sorted_position,
+            "sorted_seg": sorted_seg,
+            "sorted_vocab": sorted_vocab,
+            "label_segments": label_segments,
+            "label_indices": label_indices,
+            "BIG": torch.tensor(BIG, dtype=torch.long, device=device),
+            "V": torch.tensor(V, dtype=torch.long, device=device),
+        }
+        return history_mask, temporal_data
 
     def _build_reasoning_history_mask(
         self, batch: Mapping[str, Any], segment_ids: torch.Tensor
@@ -753,10 +866,20 @@ class FEMRModel(transformers.PreTrainedModel):
             features = features[batch["transformer"]["label_indices"], :]
             if self.config.transformer_config.use_reasoning_layer:
                 history_mask = None
-                if self.config.transformer_config.reasoning_constrain_to_history:
-                    history_mask = self._build_reasoning_history_mask(batch, s)
+                temporal_data = None
+                need_history = (
+                    self.config.transformer_config.reasoning_constrain_to_history
+                    or self.config.transformer_config.reasoning_temporal_anchor
+                )
+                if need_history:
+                    history_mask, temporal_data = self._build_reasoning_history_data(batch, s)
+                    if not self.config.transformer_config.reasoning_constrain_to_history:
+                        history_mask = None  # only wanted the temporal data
                 reasoning_out, reasoning_token_ids, reasoning_weights = self.reasoning_layer(
-                    features, history_mask=history_mask
+                    features,
+                    history_mask=history_mask,
+                    temporal_data=temporal_data,
+                    ages=batch["transformer"]["ages"] if temporal_data is not None else None,
                 )
                 alpha = self.config.transformer_config.reasoning_weight
                 features = alpha * reasoning_out + (1.0 - alpha) * features
