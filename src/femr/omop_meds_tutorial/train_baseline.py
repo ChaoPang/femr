@@ -147,10 +147,18 @@ def main():
             gbm_output_dir = label_output_dir / "gbm"
             gbm_output_dir.mkdir(exist_ok=True, parents=True)
 
-            gbm_metrics_output_file = gbm_output_dir / f'metrics.json'
-            if gbm_metrics_output_file.exists():
+            gbm_metrics_output_file = gbm_output_dir / 'metrics.json'
+            gbm_booster_file = gbm_output_dir / 'booster.txt'
+            gbm_best_params_file = gbm_output_dir / 'best_params.json'
+            # Skip only when both the metrics summary AND the model artifacts
+            # already exist; otherwise re-run so a partial earlier run can be
+            # backfilled with the missing booster / hyperparameter files.
+            if (gbm_metrics_output_file.exists()
+                    and gbm_booster_file.exists()
+                    and gbm_best_params_file.exists()):
                 print(
-                    f"The result already exists for GBM {label_name} at {gbm_metrics_output_file}, it will be skipped!")
+                    f"The result already exists for GBM {label_name} at {gbm_metrics_output_file} "
+                    f"(with booster.txt + best_params.json), it will be skipped!")
             else:
                 try:
                     lightgbm_study = optuna.create_study()  # Create a new study.
@@ -201,23 +209,37 @@ def main():
                     # Persist the final booster + optuna best params so
                     # downstream feature-importance / SHAP analyses can load
                     # the model instead of retraining from scratch.
-                    gbm_final.save_model(str(gbm_output_dir / "booster.txt"))
+                    gbm_final.save_model(str(gbm_booster_file))
                     save_to_json(
                         {
                             "best_params": best_params,
                             "best_num_trees": best_num_trees,
                             "best_trial_value": float(lightgbm_study.best_trial.value),
                         },
-                        gbm_output_dir / "best_params.json",
+                        gbm_best_params_file,
                     )
+                    # Optuna trial trajectory: parquet for easy querying, pickle
+                    # for full study resumption.
+                    try:
+                        lightgbm_study.trials_dataframe().to_parquet(
+                            gbm_output_dir / "optuna_trials.parquet"
+                        )
+                    except Exception as trials_err:
+                        print(f"could not write optuna_trials.parquet: {trials_err}")
+                    save_to_pickle(lightgbm_study, gbm_output_dir / "optuna_study.pkl")
                 except Exception as e:
                     print(e)
 
             logistic_output_dir = label_output_dir / "logistic"
-            logistic_metrics_output_file = logistic_output_dir / f'metrics.json'
-            if logistic_metrics_output_file.exists():
+            logistic_metrics_output_file = logistic_output_dir / 'metrics.json'
+            logistic_model_file = logistic_output_dir / 'model.pkl'
+            # Same idempotency: skip only if both metrics and the fitted model
+            # are present; otherwise re-run to backfill the missing artifact.
+            if (logistic_metrics_output_file.exists()
+                    and logistic_model_file.exists()):
                 print(
-                    f"The result already exists for Logistic {label_name} at {logistic_metrics_output_file}, it will be skipped!")
+                    f"The result already exists for Logistic {label_name} at {logistic_metrics_output_file} "
+                    f"(with model.pkl), it will be skipped!")
             else:
                 final_train_data = apply_mask(labeled_features, train_mask | dev_mask)
                 logistic_output_dir.mkdir(exist_ok=True, parents=True)
@@ -234,7 +256,7 @@ def main():
                 save_to_json(logistic_results, logistic_metrics_output_file)
 
                 # Persist the fitted sklearn model alongside the metrics.
-                save_to_pickle(logistic_model, logistic_output_dir / "model.pkl")
+                save_to_pickle(logistic_model, logistic_model_file)
 
                 logistic_predictions = pl.DataFrame({
                     "subject_id": test_data["subject_ids"].tolist(),
