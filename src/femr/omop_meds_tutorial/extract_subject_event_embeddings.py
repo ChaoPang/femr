@@ -12,18 +12,12 @@ Output schema (one row per source event):
   source_record_id  string       -- per-event UUID from the source EHR row
   encounter_id      string|null  -- visit-level UUID (null for demographics)
   timestamp         timestamp[us]  -- this event's actual time
-  lookup_timestamp  timestamp[us]  -- the surviving event time whose embedding
-                                     this row borrows (= timestamp when this
-                                     event is one of the surviving events at
-                                     its own time; previous surviving time
-                                     otherwise; null if no surviving event
-                                     yet exists for the subject)
+  lookup_timestamp  timestamp[us]  -- equals timestamp (only surviving events
+                                     are emitted; one row per surviving event)
   code              string       -- e.g. "SNOMED/123", "ENCOUNTER//Ambulatory"
   position          int32        -- per-subject index in the MOTOR-processed
-                                   sequence; -1 for events before any
-                                   surviving event in the subject
-  embedding         fixed_size_list<float16>[hidden_size]  -- zero-filled for
-                                   pre-first-surviving rows (position=-1)
+                                   sequence (always >= 0)
+  embedding         fixed_size_list<float16>[hidden_size]
 
 Subjects' events are filtered to match the processor exactly (None-time,
 birth-day-person, no-features, same-day-duplicate-codes), so the model emits
@@ -49,7 +43,6 @@ each = first 44,000 test subjects.
 from __future__ import annotations
 
 import argparse
-import bisect
 import pathlib
 import pickle
 import time
@@ -226,11 +219,9 @@ def _collect_shard_inputs(
                     )
                 )
 
-        sorted_surv = sorted(time_to_pos)
-
-        # Second pass: emit a row for every source event (including
-        # filtered ones), forward-filling lookup_timestamp to the most
-        # recent surviving event at or before the event time.
+        # Second pass: emit a row for every source event whose (subject_id,
+        # timestamp) pair survived into the processed sequence, so every row
+        # maps directly to a MOTOR embedding position.
         for e in s.events:
             if e.time is None:
                 continue
@@ -239,13 +230,10 @@ def _collect_shard_inputs(
                 and getattr(e, "table", "person") == "person"
             ):
                 continue
-            idx = bisect.bisect_right(sorted_surv, e.time) - 1
-            if idx >= 0:
-                lookup_time = sorted_surv[idx]
-                position = time_to_pos[lookup_time]
-            else:
-                lookup_time = None
-                position = -1
+            if e.time not in time_to_pos:
+                continue
+            lookup_time = e.time
+            position = time_to_pos[e.time]
             events_rows.append(
                 {
                     "subject_id": int(sid),

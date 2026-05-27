@@ -25,25 +25,44 @@ from .core import Labeler
 
 KOA_SNOMED_CODES: frozenset[str] = frozenset(
     {
-        "SNOMED/239873007",         # Osteoarthritis of knee
-        "SNOMED/323301000119109",   # Osteoarthritis of left knee joint
-        "SNOMED/323321000119100",   # Osteoarthritis of right knee joint
-        "SNOMED/112981000119107",   # Bilateral osteoarthritis of knees
-        "SNOMED/1074341000119106",  # Secondary osteoarthritis of bilateral knees
-        "SNOMED/1074351000119108",  # Secondary osteoarthritis of left knee
-        "SNOMED/1074361000119105",  # Secondary osteoarthritis of right knee
-        "SNOMED/1287058006",        # Secondary osteoarthritis of knee joint
-        "SNOMED/789001000",         # Osteoarthritis of knee due to and following trauma
+        "SNOMED/239873007",              # Osteoarthritis of knee
+        "SNOMED/323301000119109",        # Osteoarthritis of left knee joint
+        "SNOMED/323321000119100",        # Osteoarthritis of right knee joint
+        "SNOMED/112981000119107",        # Bilateral osteoarthritis of knees
+        "SNOMED/1074341000119106",       # Secondary osteoarthritis of bilateral knees
+        "SNOMED/1074351000119108",       # Secondary osteoarthritis of left knee
+        "SNOMED/1074361000119105",       # Secondary osteoarthritis of right knee
+        "SNOMED/1287058006",             # Secondary osteoarthritis of knee joint
+        "SNOMED/789001000",              # Osteoarthritis of knee due to and following trauma
+        "SNOMED/450521003",              # Patellofemoral osteoarthritis
+        "SNOMED/12367411000119102",      # Osteoarthritis of left patellofemoral joint
+        "SNOMED/12367461000119104",      # Bilateral patellofemoral joint osteoarthritis
+        "SNOMED/12367361000119109",      # Osteoarthritis of right patellofemoral joint
+        "SNOMED/1055297002",             # Gonarthrosis of left knee due to and following trauma
+        "SNOMED/1055298007",             # Gonarthrosis of right knee due to and following trauma
+        "SNOMED/201858005",              # Post-traumatic gonarthrosis, bilateral
     }
 )
 
 KOA_ICD10CM_CODES: frozenset[str] = frozenset(
     {
-        "ICD10CM/M17.0", "ICD10CM/M17.1", "ICD10CM/M17.10",
-        "ICD10CM/M17.11", "ICD10CM/M17.12", "ICD10CM/M17.2",
-        "ICD10CM/M17.3", "ICD10CM/M17.30", "ICD10CM/M17.31",
-        "ICD10CM/M17.32", "ICD10CM/M17.4", "ICD10CM/M17.5",
-        "ICD10CM/M17.9",
+        "ICD10CM/M17",                  # Osteoarthritis of knee (root)
+        "ICD10CM/M17.0",                # Bilateral primary osteoarthritis of knee
+        "ICD10CM/M17.1",                # Unilateral primary osteoarthritis of knee
+        "ICD10CM/M17.10",               # Unilateral primary osteoarthritis, unspecified knee
+        "ICD10CM/M17.11",               # Unilateral primary osteoarthritis, right knee
+        "ICD10CM/M17.12",               # Unilateral primary osteoarthritis, left knee
+        "ICD10CM/M17.2",                # Bilateral post-traumatic osteoarthritis of knee
+        "ICD10CM/M17.3",                # Unilateral post-traumatic osteoarthritis of knee
+        "ICD10CM/M17.30",               # Unilateral post-traumatic osteoarthritis, unspecified knee
+        "ICD10CM/M17.31",               # Unilateral post-traumatic osteoarthritis, right knee
+        "ICD10CM/M17.32",               # Unilateral post-traumatic osteoarthritis, left knee
+        "ICD10CM/M17.4",                # Other bilateral secondary osteoarthritis of knee
+        "ICD10CM/M17.5",                # Other unilateral secondary osteoarthritis of knee
+        "ICD10CM/M17.9",                # Osteoarthritis of knee, unspecified
+        "ICD10CM/M94.261",              # Chondromalacia, right knee
+        "ICD10CM/M94.262",              # Chondromalacia, left knee
+        "ICD10CM/M94.269",              # Chondromalacia, unspecified knee
     }
 )
 
