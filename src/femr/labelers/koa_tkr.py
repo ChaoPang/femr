@@ -15,10 +15,13 @@ matching the constraint that TKR must be a procedural code.
 from __future__ import annotations
 
 import datetime
-from typing import List, Optional, Set
+import functools
+import itertools
+from typing import Iterator, List, NamedTuple, Optional, Set
 
 import meds
 import meds_reader
+import pandas as pd
 
 from .core import Labeler
 
@@ -271,3 +274,150 @@ class TKRSinceKOALabeler(Labeler):
                 boolean_value=False,
             )
         ]
+
+
+# A survival/time-to-event label.  Mirrors the binary `meds.Label`
+# (subject_id, prediction_time) but replaces `boolean_value` with the two fields
+# a survival model needs: the time until the event-or-censoring and whether the
+# event was actually observed.
+class SurvivalLabel(NamedTuple):
+    subject_id: int
+    prediction_time: datetime.datetime
+    time_to_event_days: float
+    event_observed: bool
+
+
+def _survival_label_map_func(
+    subjects: Iterator[meds_reader.Subject], *, labeler: "TKRTimeToEventLabeler"
+) -> pd.DataFrame:
+    data = itertools.chain.from_iterable(labeler.label(subject) for subject in subjects)
+    final = pd.DataFrame.from_records(data, columns=SurvivalLabel._fields)
+    final["prediction_time"] = final["prediction_time"].astype("datetime64[us]")
+    return final
+
+
+class TKRTimeToEventLabeler:
+    """Time-to-event (survival) version of :class:`TKRSinceKOALabeler`.
+
+    Identical cohort definition and exclusions as the binary labeler — same KOA
+    index event, same prior-arthroplasty / history-of-TKR / pre-KOA-workup
+    exclusions, and the same TKR washout — but instead of collapsing the outcome
+    to a within-horizon boolean it emits a survival label per subject:
+
+      * ``prediction_time``     = the subject's first KOA event (the time origin).
+      * ``time_to_event_days``  = days from the prediction time to the first
+                                  qualifying TKR if one is observed, otherwise
+                                  days from the prediction time to the censoring
+                                  time (the subject's last recorded event).
+      * ``event_observed``      = True iff a qualifying TKR was observed, else
+                                  False (right-censored).
+
+    Unlike the binary labeler this never drops a subject for censoring — a
+    censored subject is emitted with ``event_observed=False`` and their actual
+    follow-up time, so partial follow-up is used rather than discarded.
+
+    Censoring note: the censoring time is the subject's last event time
+    (administrative end / loss to follow-up).  A death event, if present, is the
+    subject's last event and therefore acts as a censoring time here rather than
+    a competing event.  Switch to a fixed administrative cutoff or competing-risk
+    handling by overriding ``get_censor_time``.
+    """
+
+    def __init__(
+        self,
+        koa_codes: Optional[Set[str]] = None,
+        tkr_codes: Optional[Set[str]] = None,
+        pkr_codes: Optional[Set[str]] = None,
+        history_of_tkr_codes: Optional[Set[str]] = None,
+        pre_koa_exclusion_codes: Optional[Set[str]] = None,
+        prediction_time_offset: datetime.timedelta = datetime.timedelta(0),
+        tkr_washout: datetime.timedelta = datetime.timedelta(days=60),
+    ):
+        self.koa_codes: Set[str] = set(koa_codes) if koa_codes is not None else set(KOA_CODES)
+        self.tkr_codes: Set[str] = set(tkr_codes) if tkr_codes is not None else set(TKR_CODES)
+        self.pkr_codes: Set[str] = set(pkr_codes) if pkr_codes is not None else set(PKR_CODES)
+        self.history_of_tkr_codes: Set[str] = (
+            set(history_of_tkr_codes)
+            if history_of_tkr_codes is not None
+            else set(HISTORY_OF_TKR_CODES)
+        )
+        self.pre_koa_exclusion_codes: Set[str] = (
+            set(pre_koa_exclusion_codes)
+            if pre_koa_exclusion_codes is not None
+            else set(PRE_KOA_EXCLUSION_CODES)
+        )
+        self.prediction_time_offset = prediction_time_offset
+        self.tkr_washout = tkr_washout
+
+    def get_censor_time(self, subject: meds_reader.Subject) -> Optional[datetime.datetime]:
+        """Censoring time for a subject without an observed TKR (last event time)."""
+        return subject.events[-1].time
+
+    def label(self, subject: meds_reader.Subject) -> List[SurvivalLabel]:
+        if not subject.events:
+            return []
+
+        first_koa_time: Optional[datetime.datetime] = None
+        first_tkr_after_koa_time: Optional[datetime.datetime] = None
+
+        for event in subject.events:
+            if event.time is None:
+                continue
+            if first_koa_time is None:
+                # Pre-KOA window: prior knee arthroplasty / history-of / workup
+                # markers disqualify the subject (same rule as the binary labeler).
+                if (
+                    event.code in self.pkr_codes
+                    or event.code in self.tkr_codes
+                    or event.code in self.history_of_tkr_codes
+                    or event.code in self.pre_koa_exclusion_codes
+                ):
+                    return []
+                if event.code in self.koa_codes:
+                    first_koa_time = event.time
+                continue
+            # first_koa_time is set; look for the first TKR strictly after washout.
+            if event.code in self.tkr_codes:
+                if event.time <= first_koa_time + self.tkr_washout:
+                    return []  # TKR within washout window — pre-planned, exclude subject
+                first_tkr_after_koa_time = event.time
+                break
+
+        if first_koa_time is None:
+            return []
+
+        prediction_time = first_koa_time + self.prediction_time_offset
+
+        if first_tkr_after_koa_time is not None:
+            tte = (first_tkr_after_koa_time - prediction_time).total_seconds() / 86400.0
+            return [
+                SurvivalLabel(
+                    subject_id=subject.subject_id,
+                    prediction_time=prediction_time,
+                    time_to_event_days=tte,
+                    event_observed=True,
+                )
+            ]
+
+        # No qualifying TKR observed -> right-censored at the censoring time.
+        censor_time = self.get_censor_time(subject)
+        if censor_time is None:
+            return []
+        follow_up = (censor_time - prediction_time).total_seconds() / 86400.0
+        return [
+            SurvivalLabel(
+                subject_id=subject.subject_id,
+                prediction_time=prediction_time,
+                time_to_event_days=max(0.0, follow_up),
+                event_observed=False,
+            )
+        ]
+
+    def apply(self, db: meds_reader.SubjectDatabase) -> pd.DataFrame:
+        """Apply ``label()`` to every subject; returns a survival-label DataFrame."""
+        result = pd.concat(
+            db.map(functools.partial(_survival_label_map_func, labeler=self)),
+            ignore_index=True,
+        )
+        result.sort_values(by=["subject_id", "prediction_time"], inplace=True)
+        return result
