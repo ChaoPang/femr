@@ -18,6 +18,7 @@ LABEL_NAMES = [
     "death",
     "long_los",
     "tkr_since_koa",
+    "tkr_tte",
 ]
 # Truveta encodes encounters as paired (start, end) events with code
 # "ENCOUNTER//<type>" and "ENCOUNTER_END//<type>", and event.end is always None.
@@ -90,9 +91,11 @@ labelers: Mapping[str, femr.labelers.Labeler] = {
     'death': OmopInpatientMortalityLabeler(time_after_admission=datetime.timedelta(hours=48)),
     'long_los': OmopLongAdmissionLabeler(time_after_admission=datetime.timedelta(hours=48),
                                          admission_length=datetime.timedelta(days=7)),
-    'tkr_since_koa': femr.labelers.TKRSinceKOALabeler(
+    'tkr_since_koa': femr.labelers.TKRLabeler(
+        mode="binary",
         time_horizon=datetime.timedelta(days=365 * 5),
     ),
+    'tkr_tte': femr.labelers.TKRLabeler(mode="tte"),
 }
 
 
