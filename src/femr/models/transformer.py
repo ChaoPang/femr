@@ -292,6 +292,43 @@ class CLMBRTaskHead(nn.Module):
         return loss, {"logits": logits}
 
 
+class BinaryClassificationTaskHead(nn.Module):
+    """A simple binary classification head for supervised fine-tuning.
+
+    Consumes the per-label representations gathered at ``label_indices`` and
+    emits a single logit per label, trained with binary cross entropy against
+    ``batch["labels"]`` (the boolean outcome supplied by BinaryClassificationTask).
+
+    ``pos_weight`` (optional) up-weights the positive class in the loss, useful
+    for imbalanced cohorts (e.g. TKR is ~14% positive).
+    """
+
+    def __init__(self, hidden_size: int, pos_weight: Optional[float] = None):
+        super().__init__()
+        self.final_layer = nn.Linear(hidden_size, 1)
+        # Stored as a buffer so it follows the model's device/dtype moves and is
+        # not treated as a trainable parameter.
+        if pos_weight is not None:
+            self.register_buffer("pos_weight", torch.tensor(float(pos_weight)))
+        else:
+            self.pos_weight = None
+
+    def forward(self, features: torch.Tensor, batch: Mapping[str, torch.Tensor], return_logits=False):
+        logits = self.final_layer(features).squeeze(-1)
+        labels = batch["labels"].to(dtype=logits.dtype)
+
+        pos_weight = None
+        if self.pos_weight is not None:
+            pos_weight = self.pos_weight.to(dtype=logits.dtype)
+
+        loss = F.binary_cross_entropy_with_logits(logits, labels, pos_weight=pos_weight)
+
+        if not return_logits:
+            logits = None
+
+        return loss, {"logits": logits}
+
+
 class MOTORTaskHead(nn.Module):
     def __init__(
             self,
@@ -838,6 +875,8 @@ class FEMRModel(transformers.PreTrainedModel):
             return LabeledSubjectTaskHead(hidden_size, **task_kwargs)
         elif task_type == "motor":
             return MOTORTaskHead(hidden_size, **task_kwargs)
+        elif task_type == "binary_classification":
+            return BinaryClassificationTaskHead(hidden_size, **task_kwargs)
         else:
             raise RuntimeError("Could not determine head for task " + task_type)
 

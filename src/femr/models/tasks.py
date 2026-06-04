@@ -144,6 +144,102 @@ class LabeledSubjectTask(Task):
         return length
 
 
+class BinaryClassificationTask(Task):
+    """Supervised binary-classification task for end-to-end fine-tuning.
+
+    Combines ``LabeledSubjectTask``'s label-positioning logic (emit a label at
+    the event step that immediately precedes each label's ``prediction_time``)
+    with ``CLMBRTask``'s per-label target plumbing, so that the boolean outcome
+    for each emitted label is carried into ``batch["task"]["labels"]`` in the
+    exact same order as the transformer's ``label_indices``. That alignment is
+    what lets ``BinaryClassificationTaskHead`` match each representation to its
+    target.
+    """
+
+    def __init__(self, labels: Sequence[meds.Label], observation_window: Optional[int] = None):
+        super().__init__()
+        self.label_map: Mapping[int, Any] = collections.defaultdict(list)
+        for label in labels:
+            self.label_map[label["subject_id"]].append(label)
+
+        for k, v in self.label_map.items():
+            v.sort(key=lambda a: a["prediction_time"])
+
+        if observation_window is not None:
+            assert observation_window > 0, "the feature extract observation window must be greater than 0 or None"
+        self.observation_window = observation_window
+
+    def get_task_config(self) -> femr.models.config.FEMRTaskConfig:
+        return femr.models.config.FEMRTaskConfig(task_type="binary_classification")
+
+    def start_subject(self, subject: meds_reader.Subject, _ontology: Optional[femr.ontology.Ontology]) -> None:
+        self.current_labels = self.label_map[subject.subject_id]
+        self.current_label_index = 0
+        # Booleans for the labels emitted for THIS subject, in emission order.
+        self.per_subject_batch_labels: List[bool] = []
+
+    def needs_exact(self) -> bool:
+        return True
+
+    def start_batch(self) -> None:
+        self.batch_labels: List[bool] = []
+
+    def add_subject_labels(self, subject_label_offsets: List[int]) -> None:
+        self.batch_labels.extend([self.per_subject_batch_labels[i] for i in subject_label_offsets])
+
+    def add_event(
+            self,
+            current_date: datetime.datetime,
+            next_date: Optional[datetime.datetime],
+            next_features: Optional[Sequence[int]] = None,
+            actually_add: Optional[bool] = True,
+    ) -> int:
+        # Mirrors LabeledSubjectTask.add_event, but tracks the boolean_value of
+        # every consumed label so the per-label targets stay aligned with the
+        # emitted label positions. Returns the number of labels emitted at this
+        # event step (the caller appends one label_index per emitted label).
+        num_emitted = 0
+
+        while True:
+            if self.current_label_index == len(self.current_labels):
+                break
+
+            current_label = self.current_labels[self.current_label_index]
+
+            if self.observation_window is not None:
+                observation_start_time = (
+                        current_label["prediction_time"] - datetime.timedelta(days=self.observation_window)
+                )
+                is_valid = observation_start_time <= current_date <= current_label["prediction_time"]
+                next_valid = (
+                        next_date is not None and
+                        observation_start_time <= next_date <= current_label["prediction_time"]
+                )
+            else:
+                is_valid = current_date <= current_label["prediction_time"]
+                next_valid = next_date is not None and next_date <= current_label["prediction_time"]
+
+            if next_valid:
+                # Next event is also valid, so let it claim this label instead.
+                break
+
+            if is_valid:
+                if actually_add:
+                    self.per_subject_batch_labels.append(bool(current_label["boolean_value"]))
+                num_emitted += 1
+                self.current_label_index += 1
+            else:
+                break
+
+        return num_emitted
+
+    def get_batch_data(self) -> Mapping[str, np.ndarray]:
+        return {"labels": np.array(self.batch_labels, dtype=np.float32)}
+
+    def get_sampled_labels(self, length: int) -> int:
+        return length
+
+
 class CLMBRTask(Task):
     def __init__(self, clmbr_vocab_size: int):
         self.clmbr_vocab_size = clmbr_vocab_size
