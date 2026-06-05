@@ -57,6 +57,11 @@ viz = [
     "streamlit >= 1.30",
     "altair >= 5.0",
 ]
+survival = [
+    # time-to-event baseline (train_baseline_tte.py)
+    "xgboost >= 2.0",
+    "scikit-survival >= 0.22",
+]
 
 [tool.isort]
 multi_line_output = 3
