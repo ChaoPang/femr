@@ -96,7 +96,7 @@ class BatchCreator:
         self.offsets = []
         self.subject_lengths = []
 
-        if False:
+        if not self.tokenizer.is_hierarchical:
             self.tokens = []
         elif isinstance(self.tokenizer, femr.models.tokenizer.HierarchicalTokenizer):
             self.hierarchical_tokens = []
@@ -218,7 +218,7 @@ class BatchCreator:
                     for _ in range(num_added):
                         per_subject_label_indices.append(len(per_subject_ages) - 1)
 
-            if False:
+            if not self.tokenizer.is_hierarchical:
                 assert len(features) == 1
                 per_subject_tokens.append(features[0])
             elif isinstance(self.tokenizer, femr.models.tokenizer.HierarchicalTokenizer):
@@ -271,7 +271,7 @@ class BatchCreator:
         self.time_data[start_index] = per_subject_time_data[0]
         self.timestamps[start_index] = per_subject_timestamps[0]
 
-        if False: #not self.tokenizer.is_hierarchical:
+        if not self.tokenizer.is_hierarchical:
             # Easy for simple tokenizer
             self.tokens.extend(per_subject_tokens[offset : offset + length_to_add])
         elif isinstance(self.tokenizer, femr.models.tokenizer.HierarchicalTokenizer):
@@ -345,7 +345,7 @@ class BatchCreator:
             "label_indices": np.array(self.label_indices, dtype=np.int32),
         }
 
-        if False: #not self.tokenizer.is_hierarchical:
+        if not self.tokenizer.is_hierarchical:
             # For a single tokenizer, these are simple the token indices
             transformer["tokens"] = np.array(self.tokens, dtype=token_dtype)
         elif isinstance(self.tokenizer, femr.models.tokenizer.HierarchicalTokenizer):
