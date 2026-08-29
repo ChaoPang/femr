@@ -171,7 +171,8 @@ class BatchCreator:
                 # Get features and weights for the current event
                 features, weights = self.tokenizer.get_feature_codes(event)
                 per_subject_hierarchical_tokens.extend(features)
-                per_subject_hierarchical_weights.extend(weights)
+                if weights is not None:
+                    per_subject_hierarchical_weights.extend(weights)
 
         per_subject_token_indices.append(len(per_subject_hierarchical_tokens))
         per_subject_ages.append((event.time - birth) / datetime.timedelta(days=1))
