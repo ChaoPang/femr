@@ -175,9 +175,9 @@ class BatchCreator:
                     per_subject_hierarchical_weights.extend(weights)
 
         per_subject_token_indices.append(len(per_subject_hierarchical_tokens))
-        per_subject_ages.append((event.time - birth) / datetime.timedelta(days=1))
+        per_subject_ages.append(0.0)  # demographics token is always at birth (age 0)
         per_subject_time_data.append([1, 0, 0, 0, 0])
-        per_subject_timestamps.append(event.time.replace(tzinfo=datetime.timezone.utc).timestamp())
+        per_subject_timestamps.append(birth.replace(tzinfo=datetime.timezone.utc).timestamp())
                 
         for event in subject.events:
             if event.time is None or (
