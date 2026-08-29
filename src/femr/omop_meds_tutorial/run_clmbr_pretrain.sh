@@ -136,51 +136,79 @@ echo "  PER_DEVICE_EVAL_BATCH_SIZE:    $PER_DEVICE_EVAL_BATCH_SIZE"
 echo "  LEARNING_RATE:                 $LEARNING_RATE"
 echo
 
-# Step 1: Prepare data
-echo "Step 1: Preparing CLMBR data..."
-python -u src/femr/omop_meds_tutorial/prepare_clmbr.py \
-    --pretraining_data "$PRETRAINING_DATA" \
-    --meds_reader "$OMOP_MEDS_READER" \
-    --num_threads "$NUM_THREADS" \
-    --tokens_per_batch "$TOKENS_PER_BATCH"
+# Derived paths for incremental checks
+TOKENIZER_PATH="$PRETRAINING_DATA/tokenizer"
+TASK_PATH="$PRETRAINING_DATA/clmbr_task.pkl"
+TRAIN_BATCHES_PATH="$PRETRAINING_DATA/train_batches"
+VAL_BATCHES_PATH="$PRETRAINING_DATA/val_batches"
+MODEL_CONFIG_PATH="$OUTPUT_DIR/config.json"
 
-if [ $? -ne 0 ]; then
-    echo "Error: Data preparation failed." >&2
-    exit 1
+# Step 1: Prepare data (incremental — skips sub-steps whose outputs already exist)
+if [ -d "$TOKENIZER_PATH" ] && [ -f "$TASK_PATH" ] && [ -d "$TRAIN_BATCHES_PATH" ] && [ -d "$VAL_BATCHES_PATH" ]; then
+    echo "Step 1: Skipping data preparation (tokenizer, task, and batches already exist)."
+else
+    echo "Step 1: Preparing CLMBR data..."
+    if [ -d "$TOKENIZER_PATH" ]; then
+        echo "  - Tokenizer already exists, skipping."
+    fi
+    if [ -f "$TASK_PATH" ]; then
+        echo "  - CLMBR task already exists, skipping."
+    fi
+    if [ -d "$TRAIN_BATCHES_PATH" ]; then
+        echo "  - Train batches already exist, skipping."
+    fi
+    if [ -d "$VAL_BATCHES_PATH" ]; then
+        echo "  - Val batches already exist, skipping."
+    fi
+
+    python -u src/femr/omop_meds_tutorial/prepare_clmbr.py \
+        --pretraining_data "$PRETRAINING_DATA" \
+        --meds_reader "$OMOP_MEDS_READER" \
+        --num_threads "$NUM_THREADS" \
+        --tokens_per_batch "$TOKENS_PER_BATCH"
+
+    if [ $? -ne 0 ]; then
+        echo "Error: Data preparation failed." >&2
+        exit 1
+    fi
+
+    echo "Data preparation complete."
 fi
-
-echo "Data preparation complete."
 echo
 
 # Step 2: Pretrain CLMBR
-echo "Step 2: Pretraining CLMBR model..."
-python -u src/femr/omop_meds_tutorial/pretrain_clmbr.py \
-    --pretraining_data "$PRETRAINING_DATA" \
-    --meds_reader "$OMOP_MEDS_READER" \
-    --n_layers "$N_LAYERS" \
-    --output_dir "$OUTPUT_DIR" \
-    --num_train_epochs "$NUM_TRAIN_EPOCHS" \
-    --per_device_train_batch_size "$PER_DEVICE_TRAIN_BATCH_SIZE" \
-    --per_device_eval_batch_size "$PER_DEVICE_EVAL_BATCH_SIZE" \
-    --learning_rate "$LEARNING_RATE" \
-    --remove_unused_columns False \
-    --bf16 True \
-    --weight_decay 0.1 \
-    --adam_beta2 0.95 \
-    --report_to tensorboard \
-    --warmup_steps 500 \
-    --logging_strategy epoch \
-    --save_strategy epoch \
-    --eval_strategy epoch \
-    --dataloader_num_workers 12 \
-    --save_total_limit 10 \
-    --load_best_model_at_end True \
-    --metric_for_best_model eval_loss \
-    --greater_is_better False
+if [ -f "$MODEL_CONFIG_PATH" ]; then
+    echo "Step 2: Skipping pretraining (model already exists at $OUTPUT_DIR)."
+else
+    echo "Step 2: Pretraining CLMBR model..."
+    python -u src/femr/omop_meds_tutorial/pretrain_clmbr.py \
+        --pretraining_data "$PRETRAINING_DATA" \
+        --meds_reader "$OMOP_MEDS_READER" \
+        --n_layers "$N_LAYERS" \
+        --output_dir "$OUTPUT_DIR" \
+        --num_train_epochs "$NUM_TRAIN_EPOCHS" \
+        --per_device_train_batch_size "$PER_DEVICE_TRAIN_BATCH_SIZE" \
+        --per_device_eval_batch_size "$PER_DEVICE_EVAL_BATCH_SIZE" \
+        --learning_rate "$LEARNING_RATE" \
+        --remove_unused_columns False \
+        --bf16 True \
+        --weight_decay 0.1 \
+        --adam_beta2 0.95 \
+        --report_to tensorboard \
+        --warmup_steps 500 \
+        --logging_strategy epoch \
+        --save_strategy epoch \
+        --eval_strategy epoch \
+        --dataloader_num_workers 12 \
+        --save_total_limit 10 \
+        --load_best_model_at_end True \
+        --metric_for_best_model eval_loss \
+        --greater_is_better False
 
-if [ $? -ne 0 ]; then
-    echo "Error: Pretraining failed." >&2
-    exit 1
+    if [ $? -ne 0 ]; then
+        echo "Error: Pretraining failed." >&2
+        exit 1
+    fi
+
+    echo "Pretraining complete. Model saved to $OUTPUT_DIR"
 fi
-
-echo "Pretraining complete. Model saved to $OUTPUT_DIR"
