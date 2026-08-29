@@ -158,6 +158,9 @@ class CLMBRTask(Task):
     def needs_exact(self) -> bool:
         return False
 
+    def get_sampled_labels(self, length: int) -> int:
+        return length
+
     def start_batch(self) -> None:
         self.batch_labels: List[int] = []
 
