@@ -315,3 +315,17 @@ class FlatTokenizer(transformers.utils.PushToHubMixin):
 
     def normalize_age(self, age: datetime.timedelta) -> float:
         return (age.total_seconds() - self.dictionary["age_stats"]["mean"]) / (self.dictionary["age_stats"]["std"])
+
+    def get_time_data(self, age: Optional[datetime.timedelta], delta: Optional[datetime.timedelta]) -> List[float]:
+        result = []
+        mean = self.dictionary["age_stats"]["mean"]
+        std = self.dictionary["age_stats"]["std"]
+        for v in (age, delta):
+            if v is None:
+                result.append(0)
+                result.append(0)
+            else:
+                secs = v.total_seconds()
+                result.append((secs - mean) / std)
+                result.append((math.log(secs + 1) - mean) / std)
+        return result
