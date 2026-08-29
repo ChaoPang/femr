@@ -172,6 +172,7 @@ class CLMBRTask(Task):
             current_date: datetime.datetime,
             next_date: Optional[datetime.datetime],
             next_features: Optional[Sequence[int]] = None,
+            actually_add: bool = True,
     ) -> int:
         if next_features is None:
             return 0
