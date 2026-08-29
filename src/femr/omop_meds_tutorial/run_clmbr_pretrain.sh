@@ -171,7 +171,7 @@ python -u src/femr/omop_meds_tutorial/pretrain_clmbr.py \
     --warmup_steps 500 \
     --logging_strategy epoch \
     --save_strategy epoch \
-    --evaluation_strategy epoch \
+    --eval_strategy epoch \
     --dataloader_num_workers 12 \
     --save_total_limit 10 \
     --load_best_model_at_end True \
