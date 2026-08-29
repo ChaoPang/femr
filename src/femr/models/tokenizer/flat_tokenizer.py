@@ -174,6 +174,7 @@ def convert_statistics_to_msgpack(
             "mean": statistics["age_stats"].mean(),
             "std": statistics["age_stats"].standard_deviation(),
         },
+        "is_hierarchical": False,
     }
 
     return result
