@@ -455,8 +455,12 @@ class FEMRBatchProcessor:
         return batch_data
 
     def collate(self, batches: List[Mapping[str, Any]]) -> Mapping[str, Any]:
-        """A collate function that prepares batches for being fed into a dataloader."""
-        assert len(batches) == 1, "Can only have one batch when collating"
+        """A collate function that prepares batches for being fed into a dataloader.
+
+        Each dataset item is already a pre-made FEMR batch (with many subjects and tokens),
+        so only the first item is used. In multi-GPU setups, accelerate may pass more than
+        one item; the extras are intentionally ignored since FEMR batches are self-contained.
+        """
         return {"batch": _add_dimension(self.creator.cleanup_batch(batches[0]))}
 
     def convert_dataset(
