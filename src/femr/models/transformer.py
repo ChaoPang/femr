@@ -4,6 +4,7 @@ import collections
 import json
 import math
 import pathlib
+import tempfile
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 from dataclasses import dataclass
@@ -487,41 +488,41 @@ def compute_features(
 
     cpu_device = torch.device("cpu")
 
-    batches = processor.convert_dataset(
-        filtered_data, tokens_per_batch=tokens_per_batch, min_subjects_per_batch=1, num_proc=num_proc
-    )
-
-    batches.set_format("pt")
-
-    loader = torch.utils.data.DataLoader(batches, num_workers=num_proc, pin_memory=True, collate_fn=processor.collate)
-
     all_subject_ids = []
     all_feature_times = []
     all_representations = []
 
-    with torch.no_grad():
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            for batch in tqdm(loader):
-                if device:
-                    batch = to_device(batch, device)
+    with tempfile.TemporaryDirectory() as tmp_cache:
+        batches = processor.convert_dataset(
+            filtered_data, tokens_per_batch=tokens_per_batch, min_subjects_per_batch=1, num_proc=num_proc,
+            cache_dir=tmp_cache,
+        )
+        batches.set_format("pt")
+        loader = torch.utils.data.DataLoader(batches, num_workers=num_proc, pin_memory=True, collate_fn=processor.collate)
 
-                if total_flops:
-                    with profile(
-                            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                            with_flops=True,
-                    ) as prof:
+        with torch.no_grad():
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                for batch in tqdm(loader):
+                    if device:
+                        batch = to_device(batch, device)
+
+                    if total_flops:
+                        with profile(
+                                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                                with_flops=True,
+                        ) as prof:
+                            _, result = model(**batch, return_reprs=True)
+
+                        for event in prof.key_averages():
+                            if hasattr(event, "flops") and event.flops > 0:
+                                # Convert to GFLOPs
+                                total_flops.total_flops += event.flops / 1e9
+                    else:
                         _, result = model(**batch, return_reprs=True)
 
-                    for event in prof.key_averages():
-                        if hasattr(event, "flops") and event.flops > 0:
-                            # Convert to GFLOPs
-                            total_flops.total_flops += event.flops / 1e9
-                else:
-                    _, result = model(**batch, return_reprs=True)
-
-                all_subject_ids.append(result["subject_ids"].to(cpu_device, non_blocking=True))
-                all_feature_times.append(result["timestamps"].to(cpu_device, non_blocking=True))
-                all_representations.append(result["representations"].to(cpu_device, non_blocking=True))
+                    all_subject_ids.append(result["subject_ids"].to(cpu_device, non_blocking=True))
+                    all_feature_times.append(result["timestamps"].to(cpu_device, non_blocking=True))
+                    all_representations.append(result["representations"].to(cpu_device, non_blocking=True))
 
     torch.cuda.synchronize()
 

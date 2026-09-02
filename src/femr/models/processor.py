@@ -471,7 +471,7 @@ class FEMRBatchProcessor:
         return {"batch": _add_dimension(self.creator.cleanup_batch(batches[0]))}
 
     def convert_dataset(
-        self, db: meds_reader.SubjectDatabase, tokens_per_batch: int, min_subjects_per_batch: int = 2, num_proc: int = 1
+        self, db: meds_reader.SubjectDatabase, tokens_per_batch: int, min_subjects_per_batch: int = 2, num_proc: int = 1, cache_dir: Optional[str] = None
     ):
         """Convert an entire dataset to batches.
 
@@ -554,6 +554,7 @@ class FEMRBatchProcessor:
             },
             num_proc=num_proc // 4,
             writer_batch_size=8,
+            cache_dir=cache_dir,
         )
 
         return batch_dataset
