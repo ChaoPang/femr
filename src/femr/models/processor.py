@@ -178,6 +178,11 @@ class BatchCreator:
         per_subject_ages.append(0.0)  # demographics token is always at birth (age 0)
         per_subject_time_data.append([1, 0, 0, 0, 0])
         per_subject_timestamps.append(birth.replace(tzinfo=datetime.timezone.utc).timestamp())
+
+        # For flat tokenizer, add a birth placeholder token so tokens stay aligned with ages/time_data
+        if not self.tokenizer.is_hierarchical:
+            birth_token = per_subject_hierarchical_tokens[0] if per_subject_hierarchical_tokens else 0
+            per_subject_tokens.append(birth_token)
                 
         for event in subject.events:
             if event.time is None or (
@@ -270,6 +275,8 @@ class BatchCreator:
         self.ages[start_index] = per_subject_ages[0]
         self.time_data[start_index] = per_subject_time_data[0]
         self.timestamps[start_index] = per_subject_timestamps[0]
+        if not self.tokenizer.is_hierarchical:
+            self.tokens[start_index] = per_subject_tokens[0]
 
         if not self.tokenizer.is_hierarchical:
             # Easy for simple tokenizer
