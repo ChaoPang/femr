@@ -275,12 +275,12 @@ class BatchCreator:
         self.ages[start_index] = per_subject_ages[0]
         self.time_data[start_index] = per_subject_time_data[0]
         self.timestamps[start_index] = per_subject_timestamps[0]
-        if not self.tokenizer.is_hierarchical:
-            self.tokens[start_index] = per_subject_tokens[0]
 
         if not self.tokenizer.is_hierarchical:
             # Easy for simple tokenizer
             self.tokens.extend(per_subject_tokens[offset : offset + length_to_add])
+            # Restore birth token at the start of this subject's window
+            self.tokens[start_index] = per_subject_tokens[0]
         elif isinstance(self.tokenizer, femr.models.tokenizer.HierarchicalTokenizer):
             # Hierarchical tokenizer is more complex since we have to shift the indices as well
             # Remember, these arrays are all designed for PyTorch EmbeddingBag
