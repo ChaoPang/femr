@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import collections
+import json
 import math
+import pathlib
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 from dataclasses import dataclass
@@ -462,8 +464,14 @@ def compute_features(
     """
     task = femr.models.tasks.LabeledSubjectTask(labels, observation_window)
 
-    config = femr.models.config.FEMRModelConfig.from_pretrained(model_path)
-    config.task_config = task.get_task_config()
+    # Load the transformer config directly from config.json to avoid HuggingFace
+    # deserialization dropping the nested transformer_config (and its vocab_size).
+    with open(pathlib.Path(model_path) / 'config.json') as f:
+        raw_config = json.load(f)
+    transformer_config = femr.models.config.FEMRTransformerConfig(**raw_config['transformer_config'])
+    config = femr.models.config.FEMRModelConfig.from_transformer_task_configs(
+        transformer_config, task.get_task_config()
+    )
     model = femr.models.transformer.FEMRModel.from_pretrained(model_path, config=config)
     tokenizer = femr.models.tokenizer.HierarchicalTokenizer.from_pretrained(model_path, ontology=ontology)
     processor = femr.models.processor.FEMRBatchProcessor(tokenizer, task=task)
