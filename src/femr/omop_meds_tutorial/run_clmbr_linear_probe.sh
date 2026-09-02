@@ -86,7 +86,7 @@ for cohort_path in "$COHORTS_DIR"/*/; do
     echo "========================================"
 
     echo "Step 1: Generating CLMBR features for $cohort_name..."
-    python -u src/femr/omop_meds_tutorial/generate_clmbr_features.py \
+    python -u -m femr.omop_meds_tutorial.generate_clmbr_features \
         --pretraining_data "$PRETRAINING_DATA" \
         --meds_reader "$OMOP_MEDS_READER" \
         --cohort_dir "$cohort_path"
@@ -97,7 +97,7 @@ for cohort_path in "$COHORTS_DIR"/*/; do
     fi
 
     echo "Step 2: Running linear probe for $cohort_name..."
-    python -u src/femr/omop_meds_tutorial/finetune_clmbr.py \
+    python -u -m femr.omop_meds_tutorial.finetune_clmbr \
         --pretraining_data "$PRETRAINING_DATA" \
         --meds_reader "$OMOP_MEDS_READER" \
         --cohort_label "$cohort_name"
