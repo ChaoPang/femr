@@ -473,7 +473,11 @@ def compute_features(
         transformer_config, task.get_task_config()
     )
     model = femr.models.transformer.FEMRModel.from_pretrained(model_path, config=config)
-    tokenizer = femr.models.tokenizer.HierarchicalTokenizer.from_pretrained(model_path, ontology=ontology)
+    if transformer_config.is_hierarchical:
+        tokenizer = femr.models.tokenizer.HierarchicalTokenizer.from_pretrained(model_path, ontology=ontology)
+    else:
+        from femr.models.tokenizer.flat_tokenizer import FlatTokenizer
+        tokenizer = FlatTokenizer.from_pretrained(model_path)
     processor = femr.models.processor.FEMRBatchProcessor(tokenizer, task=task)
 
     filtered_data = db.filter(list(task.label_map.keys()))
