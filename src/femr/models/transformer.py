@@ -462,7 +462,9 @@ def compute_features(
     """
     task = femr.models.tasks.LabeledSubjectTask(labels, observation_window)
 
-    model = femr.models.transformer.FEMRModel.from_pretrained(model_path, task_config=task.get_task_config())
+    config = femr.models.config.FEMRModelConfig.from_pretrained(model_path)
+    config.task_config = task.get_task_config()
+    model = femr.models.transformer.FEMRModel.from_pretrained(model_path, config=config)
     tokenizer = femr.models.tokenizer.HierarchicalTokenizer.from_pretrained(model_path, ontology=ontology)
     processor = femr.models.processor.FEMRBatchProcessor(tokenizer, task=task)
 
