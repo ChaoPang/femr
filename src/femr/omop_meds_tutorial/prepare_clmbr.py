@@ -35,7 +35,7 @@ def main(args):
             print("Train tokenizer")
             tokenizer = train_tokenizer(
                 main_database,
-                vocab_size=1024 * 16,
+                vocab_size=args.vocab_size,
             )
             tokenizer.save_pretrained(tokenizer_path)
         else:
@@ -116,6 +116,21 @@ def create_omop_meds_tutorial_argparser():
         required=False,
         type=int,
         default=16384,
+    )
+    parser.add_argument(
+        "--vocab_size",
+        dest="vocab_size",
+        action="store",
+        required=False,
+        type=int,
+        default=1024 * 16,
+        help=(
+            "Max number of vocab entries to keep. The tokenizer ranks codes by a "
+            "binary-entropy score and keeps the top vocab_size, which disproportionately "
+            "drops rare/long-tail codes first. Set this >= the number of unique codes in "
+            "your dataset to stop dropping codes entirely (i.e. effectively disable the "
+            "entropy-based truncation)."
+        ),
     )
     return parser
 

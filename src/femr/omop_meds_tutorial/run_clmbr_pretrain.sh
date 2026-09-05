@@ -4,6 +4,7 @@
 SCRIPT_NAME=$(basename "$0")
 NUM_THREADS=16
 TOKENS_PER_BATCH=16384
+VOCAB_SIZE=16384
 N_LAYERS=16
 NUM_TRAIN_EPOCHS=10
 PER_DEVICE_TRAIN_BATCH_SIZE=1
@@ -24,6 +25,8 @@ show_help() {
     echo "  --output_dir                     Directory to save model checkpoints (default: <pretraining_data>/clmbr_model)"
     echo "  --num_threads                    Number of threads for data preparation (default: $NUM_THREADS)"
     echo "  --tokens_per_batch               Tokens per batch for data preparation (default: $TOKENS_PER_BATCH)"
+    echo "  --vocab_size                     Max tokenizer vocab entries; set >= number of unique codes"
+    echo "                                    in your dataset to stop dropping rare codes (default: $VOCAB_SIZE)"
     echo "  --n_layers                       Number of transformer layers (default: $N_LAYERS)"
     echo "  --num_train_epochs               Number of training epochs (default: $NUM_TRAIN_EPOCHS)"
     echo "  --per_device_train_batch_size    Train batch size per device (default: $PER_DEVICE_TRAIN_BATCH_SIZE)"
@@ -66,6 +69,10 @@ while [ $# -gt 0 ]; do
             ;;
         --tokens_per_batch)
             TOKENS_PER_BATCH="$2"
+            shift 2
+            ;;
+        --vocab_size)
+            VOCAB_SIZE="$2"
             shift 2
             ;;
         --n_layers)
@@ -129,6 +136,7 @@ echo "  OMOP_MEDS_READER:              $OMOP_MEDS_READER"
 echo "  OUTPUT_DIR:                    $OUTPUT_DIR"
 echo "  NUM_THREADS:                   $NUM_THREADS"
 echo "  TOKENS_PER_BATCH:              $TOKENS_PER_BATCH"
+echo "  VOCAB_SIZE:                    $VOCAB_SIZE"
 echo "  N_LAYERS:                      $N_LAYERS"
 echo "  NUM_TRAIN_EPOCHS:              $NUM_TRAIN_EPOCHS"
 echo "  PER_DEVICE_TRAIN_BATCH_SIZE:   $PER_DEVICE_TRAIN_BATCH_SIZE"
@@ -165,7 +173,8 @@ else
         --pretraining_data "$PRETRAINING_DATA" \
         --meds_reader "$OMOP_MEDS_READER" \
         --num_threads "$NUM_THREADS" \
-        --tokens_per_batch "$TOKENS_PER_BATCH"
+        --tokens_per_batch "$TOKENS_PER_BATCH" \
+        --vocab_size "$VOCAB_SIZE"
 
     if [ $? -ne 0 ]; then
         echo "Error: Data preparation failed." >&2
